@@ -109,7 +109,7 @@ class MMSDelivery:
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
         self.mms_pause = self.mms.get_mms_pause()
-        self.mms_filament_fracture = self.mms.get_mms_filament_fracture()
+        self.mms_fil_detection = self.mms.get_mms_filament_detection()
         # Configuration parameters
         self.retry_times = self.mms.get_retry_times()
         # Singleton async task
@@ -374,7 +374,13 @@ class MMSDelivery:
         # Apply move
         mms_drive = mms_slot.get_mms_drive()
         mms_drive.update_focus_slot(slot_num)
-        mms_drive.manual_move(distance, speed, accel)
+        # mms_drive.manual_move(distance, speed, accel)
+        context = (
+            self.mms_fil_detection.monitor()
+            if distance>0 else nullcontext()
+        )
+        with context:
+            mms_drive.manual_move(distance, speed, accel)
 
         self.log_info_s(f"{msg} finish")
 
@@ -412,10 +418,10 @@ class MMSDelivery:
         # Apply drive move
         mms_drive = mms_slot.get_mms_drive()
         mms_drive.update_focus_slot(slot_num)
-        # If deliver forward, enable filament fracture monitoring
+        # If deliver forward, enable monitoring
         # Else disable with Null context manager
         context = (
-            self.mms_filament_fracture.monitor_while_homing(slot_num)
+            self.mms_fil_detection.monitor()
             if distance>0 else nullcontext()
         )
         with context:
@@ -447,10 +453,10 @@ class MMSDelivery:
         endstop_pair = mms_slot.format_endstop_pair(pin_type)
 
         with wait():
-            # If deliver forward, enable filament fracture monitoring
+            # If deliver forward, enable monitoring
             # Else disable with Null context manager
             context = (
-                self.mms_filament_fracture.monitor_while_homing(slot_num)
+                self.mms_fil_detection.monitor()
                 if forward else nullcontext()
             )
             with context:
@@ -1136,31 +1142,8 @@ class MMSDelivery:
         self.mms_stop(slot_num)
 
     def cmd_MMS_D_TEST(self, gcmd):
-        loop_times = 200
+        return
 
-        fracture_enabled = self.mms_filament_fracture.is_enabled()
-        self.mms_filament_fracture.activate()
-
-        for i in range(loop_times):
-            for mms_slot in self.mms.get_mms_slots():
-                slot_num = mms_slot.get_num()
-
-                if mms_slot.inlet.is_released():
-                    continue
-
-                try:
-                    self.load_to_outlet(slot_num)
-                except:
-                    pass
-                self.pause(3)
-                self.wait_mms_selector_and_drive(slot_num, timeout=60)
-                mms_slot.slot_led.deactivate_blinking()
-                if mms_slot.outlet.is_triggered():
-                    self.mms_prepare(slot_num)
-
-        if not fracture_enabled:
-            self.mms_filament_fracture.deactivate()
-        
     # For KlipperScreen
     def cmd_MMS_SELECT_U(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)

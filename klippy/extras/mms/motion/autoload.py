@@ -1,6 +1,6 @@
 # Support for MMS Autoload
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -14,9 +14,7 @@ from ..adapters import (
     toolhead_adapter,
 )
 from ..core.config import PrinterConfig
-from ..core.exceptions import (
-    DeliveryTerminateSignal,
-)
+from ..core.exceptions import DeliveryTerminateSignal
 from ..core.task import AsyncTask
 
 

@@ -27,7 +27,8 @@ from .hardware.button import (
     MMSButtonOutlet,
 )
 from .hardware.stepper import MMSSelector, MMSDrive
-from .motion.fracture import MMSFilamentFracture
+from .motion.endless_spool import MMSEndlessSpool
+from .motion.filament_detection import MMSFilamentDetection
 from .motion.pause import MMSPause
 from .motion.resume import MMSResume
 
@@ -35,7 +36,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0380"
+    version: str = "0.1.0391"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -65,9 +66,8 @@ class PrinterMMSConfig(PrinterConfig):
     # The optional Pin configured for entry_sensor
     entry_sensor: OptionalField = ""
 
-    fracture_detection_enable: int = 1
-
-    slot_substitute_enable: int = 1
+    filament_detection_enable: int = 1
+    endless_spool_enable: int = 1
 
 
 @dataclass(frozen=True)
@@ -166,7 +166,8 @@ class MMS:
 
         self.mms_pause = MMSPause()
         self.mms_resume = MMSResume()
-        self.mms_filament_fracture = MMSFilamentFracture()
+        self.mms_endless_spool = MMSEndlessSpool()
+        self.mms_fil_detection = MMSFilamentDetection()
 
         # Init periodic service for MMS
         self.periodic_task_sp = PeriodicTask()
@@ -327,7 +328,10 @@ class MMS:
     # -- Initializers --
     def _initialize_slots(self):
         for slot_num in self.slot_num_lst:
-            self.mms_slots.append(printer_adapter.get_mms_slot(slot_num))
+            mms_slot = printer_adapter.get_mms_slot(slot_num)
+            if mms_slot not in self.mms_slots:
+                self.mms_slots.append(mms_slot)
+        self.mms_slots.sort(key=lambda mms_slot: mms_slot.get_num())
 
     def _initialize_gcode(self):
         commands = [
@@ -367,6 +371,7 @@ class MMS:
             console_output=False)
 
     def _initialize_observer(self):
+        # Notice the sequence of callbacks registration
         self.print_observer = PrintObserver()
 
         # Buffer monitor
@@ -389,6 +394,16 @@ class MMS:
         self.mms_charge = printer_adapter.get_mms_charge()
         self.print_observer.register_finish_callback(
             self.mms_charge.teardown)
+
+        # Register MMS Pause callback for Print Pause
+        self.print_observer.register_pause_callback(
+            self.mms_pause.handle_print_is_paused
+        )
+
+        # Register MMS Resume callback for Print Resume
+        self.print_observer.register_resume_callback(
+            self.mms_resume.handle_print_is_resumed
+        )
 
         # Init mms_swap
         self.mms_swap = printer_adapter.get_mms_swap()
@@ -505,8 +520,17 @@ class MMS:
     def get_mms_resume(self):
         return self.mms_resume
 
-    def get_mms_filament_fracture(self):
-        return self.mms_filament_fracture
+    def get_mms_filament_detection(self):
+        return self.mms_fil_detection
+
+    def get_mms_endless_spool(self):
+        return self.mms_endless_spool
+
+    def get_mms_selectors(self):
+        return self.mms_selectors
+
+    def get_mms_drives(self):
+        return self.mms_drives
 
     # -- Get slot meta data --
     def get_meta(self, slot_num):
@@ -626,6 +650,11 @@ class MMS:
             self.log_info_s(msg)
             # return selecting if selecting is not None and loading else None
             return selecting, is_active, loading
+
+        # Directly return the charged slot
+        slot_num_charged = self.mms_charge.get_charged_slot()
+        if slot_num_charged is not None:
+            return slot_num_charged
 
         # Check the main
         m_selecting, is_active, m_loading = find_slot_sl()
@@ -832,35 +861,11 @@ class MMS:
         return
 
     # -- Config enable --
-    def fracture_detection_is_enabled(self):
-        return bool(self.p_mms_config.fracture_detection_enable)
+    def filament_detection_is_enabled(self):
+        return bool(self.p_mms_config.filament_detection_enable)
 
-    def slot_substitute_is_enabled(self):
-        return bool(self.p_mms_config.slot_substitute_enable)
-
-    def find_available_substitute_slot(self, slot_num):
-        if not self.slot_substitute_is_enabled():
-            return None
-
-        slot_num_a = None
-        slot_num_org = slot_num
-        slot_num_checked = [slot_num]
-
-        while not slot_num_a:
-            slot_num_sub = self.get_mms_slot(slot_num).get_substitute_with()
-
-            if slot_num_sub is None \
-                or slot_num_sub in slot_num_checked:
-                break
-            slot_num_checked.append(slot_num_sub)
-
-            mms_slot_sub = self.get_mms_slot(slot_num_sub)
-            if mms_slot_sub.inlet.is_triggered():
-                slot_num_a = slot_num_sub
-            else:
-                slot_num = slot_num_sub
-
-        return slot_num_a
+    def endless_spool_is_enabled(self):
+        return bool(self.p_mms_config.endless_spool_enable)
 
     # -- MMS Status --
     def _format_slot_status(self, slot_num):
@@ -915,23 +920,15 @@ class MMS:
         }
 
     def log_status(self, silent=True):
-        log_func = self.log_info_s if silent else self.log_info
-        log_func(f"MMS Version: {self.mms_config.version}")
-
         self.log_status_stepper(silent=True)
 
-        info = ""
+        info = f"MMS Version: {self.mms_config.version}\n"
         info += "Slot pins status:\n"
         for slot in self.get_mms_slots():
             info += slot.format_pins_status()
+        info += f"Charged SLOT: {self.mms_charge.get_charged_slot()}"
 
-        # if show_rfid:
-        #     info += "\n"
-        #     info += "RFID Tag Data:\n"
-        #     for slot in self.mms_slots:
-        #         info += f"slot[{slot.get_num()}] RFID data:\n"
-        #         info += json.dumps(
-        #             slot.get_rfid_status(), indent=4) + "\n"
+        log_func = self.log_info_s if silent else self.log_info
         log_func(info)
 
     def log_status_stepper(self, silent=False):
@@ -945,6 +942,13 @@ class MMS:
             self.log_info_s(info)
         else:
             self.log_info(info)
+
+    def log_observer(self):
+        if self.print_observer:
+            self.log_info_s(
+                "MMS Print Observer:\n"
+                f"{self.print_observer.get_status()}"
+            )
 
     # -- GCode commands --
     def cmd_MMS(self, gcmd):
@@ -1025,15 +1029,15 @@ class MMS:
         mms_slot.slot_rfid.rfid_truncate()
 
     def cmd_MMS_TEST(self, gcmd):
-        mcu = self.mms_selectors[0].get_mcu()
-        mcu_name = mcu._name
-        mcu_rm = mcu._conn_helper._restart_helper._restart_method
-        self.log_info("\n"
-           "mcu name:\n"
-           f"{mcu_name}\n"
-           "mcu restart_method:\n"
-           f"{mcu_rm}\n"
-        )
+        # mcu = self.mms_selectors[0].get_mcu()
+        # mcu_name = mcu._name
+        # mcu_rm = mcu._conn_helper._restart_helper._restart_method
+        # self.log_info("\n"
+        #    "mcu name:\n"
+        #    f"{mcu_name}\n"
+        #    "mcu restart_method:\n"
+        #    f"{mcu_rm}\n"
+        # )
         return
 
 

@@ -28,6 +28,7 @@ class MMSResume:
         self._is_resuming = False
         self._mms_swap_resume_func = None
         self._mms_swap_resume_gcmd = None
+        self._selected_slots = []
 
         printer_adapter.register_klippy_ready(
             self._handle_klippy_ready)
@@ -39,10 +40,12 @@ class MMSResume:
 
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
+        self.mms_delivery = printer_adapter.get_mms_delivery()
+        self.mms_charge = printer_adapter.get_mms_charge()
+        self.mms_swap = printer_adapter.get_mms_swap()
+
         self.print_observer = self.mms.get_print_observer()
         self.mms_pause = self.mms.get_mms_pause()
-
-        self.mms_swap = printer_adapter.get_mms_swap()
 
     def _initialize_gcode(self):
         commands = [
@@ -55,6 +58,10 @@ class MMSResume:
         self.log_info = mms_logger.create_log_info(console_output=False)
         self.log_warning = mms_logger.create_log_warning()
         self.log_error = mms_logger.create_log_error()
+
+    # ---- Handlers ----
+    def handle_print_is_resumed(self):
+        return
 
     # ---- Gcode control ----
     def gcode_resume(self):
@@ -74,6 +81,12 @@ class MMSResume:
             yield
         finally:
             self._is_resuming = False
+
+    def capture_selected_slots(self):
+        self._selected_slots = self.mms.get_selecting_slots()
+
+    # def truncate_selected_slots(self):
+    #     self._selected_slots = []
 
     # ---- Print control ----
     def _replace_resume(self):
@@ -140,6 +153,15 @@ class MMSResume:
             return False
 
         self.log_info("mms_resume begin")
+
+        # Reselect the charging slot or selecting slots at paused
+        slot_num_c = self.mms_charge.get_charged_slot()
+        if slot_num_c is not None:
+            self.mms_delivery.select_slot(slot_num_c)
+        else:
+            for slot_num_s in self._selected_slots:
+                self.mms_delivery.select_slot(slot_num_s)
+        self._selected_slots = []
 
         # If not pause by MMS, continue with origin resume
         if self.mms_pause.is_mms_paused():

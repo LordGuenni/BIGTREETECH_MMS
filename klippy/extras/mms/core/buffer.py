@@ -116,7 +116,7 @@ class Buffer:
         # Volume freeze flag
         self._is_freezing = False
         # Inlet triggered flag
-        self._inlet_triggered_before = False
+        self._inlet_has_triggered = False
 
         # Printer status
         self._is_ready = False
@@ -132,7 +132,8 @@ class Buffer:
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
         self.mms_delivery = printer_adapter.get_mms_delivery()
-        self.mms_filament_fracture = self.mms.get_mms_filament_fracture()
+        self.mms_endless_spool = self.mms.get_mms_endless_spool()
+        self.mms_fil_detection = self.mms.get_mms_filament_detection()
 
     def _initialize_loggers(self):
         mms_logger = printer_adapter.get_mms_logger()
@@ -290,7 +291,7 @@ class Buffer:
 
         self.log_info_s("buffer monitor activated")
         self._is_activating = True
-        self._inlet_triggered_before = False
+        self._inlet_has_triggered = False
 
     def deactivate_monitor(self):
         if not self._p_task \
@@ -306,7 +307,7 @@ class Buffer:
 
         self.log_info_s("buffer monitor deactivated")
         self._is_activating = False
-        self._inlet_triggered_before = False
+        self._inlet_has_triggered = False
 
     # ---- Feed & Retract ----
     def _simple_move_pure(self, slot_num, distance, speed, accel):
@@ -319,36 +320,32 @@ class Buffer:
         # Manual Move
         mms_drive.manual_move(distance, speed, accel)
 
+    def _simple_move_abort(self, slot_num):
+        if self.mms_endless_spool.is_inlet_released(slot_num):
+            return False
+
+        if self._inlet_has_triggered \
+            and self.mms.get_mms_slot(slot_num).inlet.is_released():
+            self.mms_fil_detection.force_handle_inlet_is_released(slot_num)
+            return True
+        return False
+
     def _simple_move(self, slot_num, distance, speed, accel):
         mms_slot = self.mms.get_mms_slot(slot_num)
-        mms_drive = mms_slot.get_mms_drive()
-        mms_drive.update_focus_slot(slot_num)
-        # No select method
-        # if not mms_slot.selector_is_triggered():
-        #     self.mms_delivery.select_slot(slot_num)
 
         # Inlet is triggered last move and now is released
-        if self._inlet_triggered_before and mms_slot.inlet.is_released():
-            self.mms_filament_fracture.force_handle_while_feeding(slot_num)
+        if self._simple_move_abort(slot_num):
             return
 
         # Update Inlet status
-        self._inlet_triggered_before = mms_slot.inlet.is_triggered()
-
-        # Drip Move
-        # context = (
-        #     self.mms_filament_fracture.monitor_while_feeding(slot_num)
-        #     if distance>0 else nullcontext()
-        # )
-        # with context:
-        #     mms_drive.drip_move(distance, speed, accel)
-
-        # Manual Move
+        self._inlet_has_triggered = mms_slot.inlet.is_triggered()
+        # No select method
+        mms_drive = mms_slot.get_mms_drive()
+        mms_drive.update_focus_slot(slot_num)
         mms_drive.manual_move(distance, speed, accel)
 
         # Inlet is triggered before manual_move and now is released
-        if self._inlet_triggered_before and mms_slot.inlet.is_released():
-            self.mms_filament_fracture.force_handle_while_feeding(slot_num)
+        self._simple_move_abort(slot_num)
 
     def _feed(self, volume, extrude_speed):
         if not volume or volume < 0:

@@ -1,6 +1,6 @@
 # Support for MMS Pause
 #
-# Copyright (C) 2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2025-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -30,6 +30,7 @@ class MMSPause:
 
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
+        self.mms_delivery = printer_adapter.get_mms_delivery()
         self.print_observer = self.mms.get_print_observer()
         self.mms_resume = self.mms.get_mms_resume()
 
@@ -44,6 +45,12 @@ class MMSPause:
         self.log_info = mms_logger.create_log_info(console_output=False)
         # self.log_warning = mms_logger.create_log_warning()
         # self.log_error = mms_logger.create_log_error()
+
+    # ---- Handlers ----
+    def handle_print_is_paused(self):
+        # if self._is_mms_paused:
+        #     return
+        self.mms_resume.capture_selected_slots()
 
     # ---- Gcode control ----
     def gcode_pause(self):
@@ -61,6 +68,19 @@ class MMSPause:
 
     def free_mms_paused(self):
         self._is_mms_paused = False
+
+    def _disable_mms_steppers(self):
+        slot_num = self.mms.get_current_slot()
+
+        for mms_drive in self.mms.get_mms_drives():
+            if mms_drive.is_running():
+                self.mms_delivery.wait_mms_drive(slot_num)
+            mms_drive.disable()
+
+        for mms_selector in self.mms.get_mms_selectors():
+            if mms_selector.is_running():
+                self.mms_delivery.wait_mms_selector(slot_num)
+            mms_selector.disable()
 
     def mms_pause(self):
         if print_stats_adapter.is_paused_or_finished() \
@@ -90,6 +110,8 @@ class MMSPause:
         gcode_move_adapter.enable_absolute_coordinates()
         # Pause with gcode command
         self.gcode_pause()
+        # Disable MMS Steppers
+        self._disable_mms_steppers()
         self.log_info("mms_pause finish")
         return True
 

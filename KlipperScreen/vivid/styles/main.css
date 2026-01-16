@@ -82,6 +82,16 @@ margin: top right bottom left;
     border-bottom-color: var(--color-dark-red); */
 }
 
+.vvd-slot-button-default {
+    background-color: #FFFFFF;
+    background-image: var(--mosaic-background);
+    background-size: var(--mosaic-size);
+    background-position: var(--mosaic-position);
+    border-radius: var(--border-radius-main);
+    border-bottom: var(--btn-border-bottom);
+    border-bottom-color: var(--color-dark-red);
+}
+
 .vvd-slot-button {
     background-color: var(--primary-color);
     border-radius: var(--border-radius-main);

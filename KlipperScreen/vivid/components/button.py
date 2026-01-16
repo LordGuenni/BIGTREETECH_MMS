@@ -577,3 +577,214 @@ class CircleButtonAnimeFull(BaseImageButton):
         cr.set_line_width(line_width)
         cr.arc(cx, cy, radius, start_angle, start_angle + arc_len)
         cr.stroke()
+
+
+class CircleButtonAnimeMosaic(BaseImageButton):
+    def __init__(self,
+        image: Gtk.Image = None, 
+        label: Gtk.Label = None,
+        diameter: int = 60, 
+        border_width: int = 20, 
+        border_color: str = "mosaic",
+        **kwargs
+    ):
+        super().__init__(image=image, label=label, box_type=Gtk.VBox, **kwargs)
+
+        # Initial configuration
+        self.diameter = diameter
+        self.border_width = border_width
+        self.border_color = border_color
+        self._border_mosaic = (border_color == "mosaic")
+        # Angle in degrees
+        self._glow_angle = 0
+        # self._glow_angle = 30
+
+        # Initialize focus state to False
+        self.is_focusing = False
+        # Rotation anime direction
+        self.reverse = False
+
+        # Derived colors
+        self._update_derived_colors()
+
+        # Set size
+        self.set_size_request(diameter, diameter)
+
+        # CSS providers
+        self._static_provider = None
+        self._dynamic_provider = None
+        # Setup CSS styling
+        self._setup_css_style()
+
+        # Connect animation + drawing
+        self.connect("draw", self.on_draw)
+        self.connect("style-updated", lambda _: self.queue_draw())
+
+        # Start rotating animation
+        self.tag_id = None
+        # self.tag_id = GLib.timeout_add(50, self.update_glow)
+
+        self._update_derived_colors()
+
+    def _update_derived_colors(self):
+        if self._border_mosaic:
+            self.base_color = "#808080"
+            self._glow_color = self.base_color
+        else:
+            self.base_color = self._border_color
+            self._glow_color = self._border_color
+
+        self.hover_color = lighten_color(self.base_color, 0.3)
+        self.active_color = lighten_color(self.base_color, 0.2)
+    
+    def _setup_css_style(self):
+        context = self.get_style_context()
+
+        if self._static_provider:
+            context.remove_provider(self._static_provider)
+        if self._dynamic_provider:
+            context.remove_provider(self._dynamic_provider)
+
+        self._static_provider = Gtk.CssProvider()
+        
+        if self._border_mosaic:
+            static_css = f"""
+            .circle-button {{
+                border-radius: 50%;
+                min-width: {self.diameter}px;
+                min-height: {self.diameter}px;
+                border: {self.border_width}px solid transparent;
+                background-color: #FFFFFF;
+                background-image: 
+                    linear-gradient(45deg, #D4D4D4 25%, transparent 25%),
+                    linear-gradient(-45deg, #D4D4D4 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #D4D4D4 75%),
+                    linear-gradient(-45deg, transparent 75%, #D4D4D4 75%);
+                background-size: 30px 30px;
+                background-position: 0 0, 0 15px, 15px -15px, -15px 0px;
+                padding: 0.5em;
+                margin: 0.5em;
+            }}
+            .circle-button > box {{
+                border-radius: 50%;
+                background-color: transparent;
+            }}
+            """
+        else:
+            static_css = f"""
+            .circle-button {{
+                border-radius: 50%;
+                min-width: {self.diameter}px;
+                min-height: {self.diameter}px;
+                border: {self.border_width}px solid;
+                background-color: transparent;
+                background-image: none;
+                padding: 0.5em;
+                margin: 0.5em;
+            }}
+            .circle-button > box {{
+                border-radius: 50%;
+                background-color: transparent;
+            }}
+            """
+        
+        self._static_provider.load_from_data(static_css.encode())
+        
+        self._dynamic_provider = Gtk.CssProvider()
+        self._update_dynamic_css()
+        
+        context.add_provider(self._static_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        context.add_provider(self._dynamic_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        context.add_class("circle-button")
+    
+    def _update_dynamic_css(self):
+        if not self._dynamic_provider:
+            return
+        
+        if self._border_mosaic:
+            dynamic_css = """
+            .circle-button:hover {
+                background-color: rgba(128, 128, 128, 0.2);
+            }
+            .circle-button:active {
+                background-color: rgba(128, 128, 128, 0.3);
+            }
+            """
+        else:
+            dynamic_css = f"""
+            .circle-button {{
+                border-color: {self.base_color};
+            }}
+            .circle-button:hover {{
+                background-color: {self.hover_color};
+            }}
+            .circle-button:active {{
+                background-color: {self.active_color};
+            }}
+            """
+        
+        self._dynamic_provider.load_from_data(dynamic_css.encode())
+
+    def set_border_color(self, new_color):
+        if self._border_color == new_color:
+            return
+        
+        self._border_color = new_color
+        self._border_mosaic = (new_color == "mosaic")
+        
+        self._update_derived_colors()
+        self._setup_css_style()
+        self.queue_draw()
+    
+    def update_glow(self):
+        """Update the arc's angle and trigger redraw."""
+        step = -5 if self.reverse else 5
+        self._glow_angle = (self._glow_angle + step) % 360 
+        self.queue_draw()
+        # Continue animation
+        return True
+
+    def start_animation(self, reverse=False):
+        if self.tag_id is None:
+            self.reverse = reverse
+            # First param is in ms
+            self.tag_id = GLib.timeout_add(50, self.update_glow)
+
+    def stop_animation(self):
+        if self.tag_id is not None:
+            GLib.source_remove(self.tag_id)
+            self.tag_id = None
+
+    def kick_animation(self):
+        for _ in range(5):
+            self.update_glow()
+
+    def set_focusing(self, focusing):
+        """Set the focus state and trigger redraw"""
+        if self.is_focusing != focusing:
+            self.is_focusing = focusing
+            self.queue_draw()
+
+    def on_draw(self, widget, cr):
+        width = self.get_allocated_width()
+        height = self.get_allocated_height()
+        cx, cy = width / 2, height / 2
+        radius = min(cx, cy) / 2
+
+        arc_length = 120
+        arc_width = radius / 5
+        start_angle = math.radians(self._glow_angle)
+        end_angle = start_angle + math.radians(arc_length)
+
+        r, g, b = hex_to_rgb(self._glow_color)
+        cr.set_source_rgba(r, g, b, 0.7)
+        cr.set_line_width(arc_width)
+        cr.arc(cx, cy, radius, start_angle, end_angle)
+        cr.stroke()
+
+        if self.is_focusing:
+            focus_radius = min(cx, cy) - 1
+            cr.set_source_rgb(1, 1, 1)
+            cr.set_line_width(focus_radius / 15)
+            cr.arc(cx, cy, focus_radius, 0, 2 * math.pi)
+            cr.stroke()

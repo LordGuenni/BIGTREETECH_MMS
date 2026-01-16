@@ -55,12 +55,12 @@ class Panel(ScreenPanel):
         # self.gf_uuid = fileinfo.get("uuid")
         self.gf_filename = fileinfo.get("filename")
 
-        filament_type_str = fileinfo.get("filament_type")
+        filament_type_str = fileinfo.get("filament_type", "")
         filament_types = [f.strip() for f in filament_type_str.split(';') if f and f.strip()]
 
         filament_colors = fileinfo.get("filament_colors", None)
         if not filament_colors:
-            filament_colors = parse_filament_colors(self.gcode_fullpath)
+            filament_colors = parse_filament_colors(self.gcode_fullpath) or []
 
         max_items = min(len(filament_types), len(filament_colors))
 

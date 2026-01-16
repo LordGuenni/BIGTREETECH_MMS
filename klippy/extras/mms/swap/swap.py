@@ -109,12 +109,15 @@ class MMSSwap:
         self.mms_purge = printer_adapter.get_mms_purge()
 
         # Get objects from MMS
-        self.print_observer = self.mms.get_print_observer()
-        self.print_observer.register_start_callback(self._init_mapping_filename)
-        self.print_observer.register_finish_callback(self._reset_mapping)
+        print_observer = self.mms.get_print_observer()
+        print_observer.register_start_callback(
+            self._init_mapping_filename
+        )
+        print_observer.register_finish_callback(self._reset_mapping)
 
         self.mms_pause = self.mms.get_mms_pause()
         self.mms_resume = self.mms.get_mms_resume()
+        self.mms_endless_spool = self.mms.get_mms_endless_spool()
 
     def _initialize_gcode(self):
         # Dynamic register swap action command
@@ -128,6 +131,7 @@ class MMSSwap:
         # GCode mapping and register
         commands = [
             ("MMS_SWAP_MAPPING", self.cmd_MMS_SWAP_MAPPING),
+            ("MMS_SWAP_MAPPING_RESET", self.cmd_MMS_SWAP_MAPPING_RESET),
         ]
         gcode_adapter.bulk_register(commands)
 
@@ -356,6 +360,9 @@ class MMSSwap:
                     self._pause_mms_buffer(slot_num_from)
                 mms_buffer_to = self._pause_mms_buffer(slot_num_to)
 
+                self.mms_endless_spool.deactivate()
+                self.mms_endless_spool.purge_truncate(slot_num_from)
+
                 # Execute swap method based on current loading state
                 if not loading_slots:
                     # No filament loaded
@@ -368,6 +375,7 @@ class MMSSwap:
 
                 # Activate target slot's mms_buffer in the end
                 mms_buffer_to.activate_monitor()
+                self.mms_endless_spool.activate()
 
             except SwapFailedSignal as e:
                 self.log_warning(f"{log_prefix} failed: {e}")
@@ -391,14 +399,18 @@ class MMSSwap:
         toolhead_adapter.truncate_snapshot()
 
         cmd = gcmd.get_command().strip()
-        self.log_warning(f"'{cmd}' failed: {msg}, pause print...")
         self.mms_resume.set_mms_swap_resume(
             func=self.cmd_SWAP, gcmd=gcmd
         )
+        log_msg = f"'{cmd}' failed: {msg},"
 
         if self.mms.printer_is_printing() \
             or idle_timeout_adapter.is_printing():
+            self.log_warning(f"{log_msg} pause print...")
             self.mms_pause.mms_pause()
+        else:
+            self.log_warning(f"{log_msg} but not printing")
+            self.mms.log_observer()
 
     # ---- T* ----
     def _parse_slot(self, command):
@@ -492,9 +504,16 @@ class MMSSwap:
         Update SLOTs mapping.
         Change slot[swap_num] to slot[slot_num]
         """
-        swap_num = gcmd.get_int("SWAP_NUM", minval=0)
-        slot_num = gcmd.get_int("SLOT", minval=0)
+        swap_num = gcmd.get_int("SWAP_NUM", minval=0, default=None)
+        slot_num = gcmd.get_int("SLOT", minval=0, default=None)
         filename = gcmd.get("FILENAME", default=None)
+
+        if swap_num is None or slot_num is None:
+            self.log_info(
+                f"current swap mapping:\n"
+                f"{self._format_swap_mapping_info()}"
+            )
+            return
 
         if not self.mms.slot_is_available(swap_num) \
             or not self.mms.slot_is_available(slot_num):
@@ -503,9 +522,8 @@ class MMSSwap:
         if filename:
             self.mapping["filename"] = filename
 
-        # self.log_info(f"origin swap mapping: {self.mapping}")
         org = self.mapping[swap_num]
-        self.mapping[swap_num] = slot_num
+        self.update_mapping_slot_num(swap_num, slot_num)
         if org != slot_num:
             self.log_info(
                 f"slot[{swap_num}] swap mapping update "
@@ -514,6 +532,23 @@ class MMSSwap:
                 f"{self._format_swap_mapping_info()}"
             )
 
+    def cmd_MMS_SWAP_MAPPING_RESET(self, gcmd):
+        self.log_info(
+            f"current swap mapping:\n"
+            f"{self._format_swap_mapping_info()}"
+            "\n"
+            "Reset to default"
+        )
+        # Reset slots mapping only
+        self.mapping = {n:n for n in self.mms.get_slot_nums()}
+        self.log_info(
+            f"detault swap mapping:\n"
+            f"{self._format_swap_mapping_info()}"
+        )
+
 
 def load_config(config):
     return MMSSwap(config)
+
+# class SWAPMapping:
+#     return

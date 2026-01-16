@@ -52,6 +52,17 @@ class GCodeAdapter(BaseAdapter):
     def console_print(self, msg, log=False):
         self._get_gcode().respond_info(msg, log)
 
+    def _respond(self, res_type, msg):
+        # Output to Console and
+        # UI(like KlipperScreen) would pop up a dialog
+        self.run_command(f"RESPOND TYPE={res_type} MSG='{msg}'")
+
+    def respond_echo(self, msg):
+        self._respond(res_type="echo", msg=msg)
+
+    def respond_error(self, msg):
+        self._respond(res_type="error", msg=msg)
+
 
 # Global instance for singleton
 gcode_adapter = GCodeAdapter()

@@ -1,6 +1,6 @@
 # Support for MMS Observer
 #
-# Copyright (C) 2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2025-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -125,7 +125,12 @@ class PrintObserver:
 
     def get_status(self):
         return {
+            "state": self.state,
+            "state_prev": self.state_prev,
             "progress": self.progress,
+
+            "is_printing": self.is_printing(),
+
             "print_stats": print_stats_adapter.get_current_status(),
             "idle_timeout": idle_timeout_adapter.get_current_status(),
             "vr_sdcard": virtual_sdcard_adapter.get_current_status(),
@@ -221,8 +226,17 @@ class CallbackManager:
             self.callbacks[event_type]= []
             return True
 
+    def unregister_start_callback(self, callback):
+        self._unregister_callback(self.p_progress.started, callback)
+
+    def unregister_finish_callback(self, callback):
+        self._unregister_callback(self.p_progress.finished, callback)
+
     def unregister_resume_callback(self, callback):
         self._unregister_callback(self.p_progress.resumed, callback)
+
+    def unregister_pause_callback(self, callback):
+        self._unregister_callback(self.p_progress.paused, callback)
 
     def handle_event(self, event_type):
         # Callbacks

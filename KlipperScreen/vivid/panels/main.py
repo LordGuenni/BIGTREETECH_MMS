@@ -14,7 +14,8 @@ from vivid.components.button import (
     HorizontalImageButton as HorButton,
     CountdownButton, 
     TempDisplayButton,
-    CircleButtonAnime
+    CircleButtonAnime,
+    CircleButtonAnimeMosaic
 )
 from vivid.components.image import VividImage as VImage
 from vivid.components.label import VividLabel as VLabel
@@ -234,6 +235,11 @@ class Panel(ScreenPanel):
             border_color=color,
             label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
         )
+        # circle = CircleButtonAnimeMosaic(
+        #     diameter=diameter,
+        #     border_width=border_width,
+        #     label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
+        # )
 
         # Create bottom label
         bottom_label = VLabel(content=material, size=font_size_material, bold=True)
@@ -249,7 +255,7 @@ class Panel(ScreenPanel):
         # button_wrapper.pack_start(bottom_label, True, False, 0)
         button_wrapper.add(circle)
         button_wrapper.add(bottom_label)
-        
+
         # Final button container
         button = Gtk.Button(
             halign=Gtk.Align.CENTER,
@@ -272,6 +278,11 @@ class Panel(ScreenPanel):
             "bottom_label" : bottom_label,
         }
         return button
+
+    # def apply_slot_button_default(self, button):
+    #     base_class = "vvd-slot-button-default"
+    #     # Apply dynamic CSS
+    #     apply_button_css(button, base_class)
 
     def apply_slot_button_color(self, button, color):
         base_class = "vvd-slot-button"

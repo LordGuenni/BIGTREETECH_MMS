@@ -71,10 +71,6 @@ class PrinterSlotConfig(PrinterConfig):
     rfid_detect_duration: float = 50  # seconds
     rfid_read_duration: float = 4  # seconds
 
-    # The optional slot_num configured for substitute
-    # Substitute current slot with another one
-    substitute_with: OptionalField = ""
-
 
 class MMSSlot:
     """
@@ -98,8 +94,6 @@ class MMSSlot:
         self.slot_led = None
         # RFID, init after klippy is connected
         self.slot_rfid = None
-        # Slot number of self substitute with
-        self.substitute_with = None
 
         self._is_ready = False
 
@@ -176,10 +170,7 @@ class MMSSlot:
         )
         # Register led effect deactivate callback
         printer_adapter.register_mms_stepper_running(
-            handler=self._handler_mms_stepper_running)
-
-        self._initialize_substitute()
-
+            handler=self._handle_mms_stepper_running)
         self._is_ready = True
 
     def _initialize_loggers(self):
@@ -201,17 +192,6 @@ class MMSSlot:
             self.slot_config.rfid_detect_duration,
             self.slot_config.rfid_read_duration
         )
-
-    def _initialize_substitute(self):
-        config_slot_num = self.slot_config.substitute_with
-        if config_slot_num is None \
-            or not config_slot_num.isdigit():
-            return
-        slot_num = int(config_slot_num)
-        if not self.mms.slot_is_available(slot_num) \
-            or slot_num == self.num:
-            return
-        self.substitute_with = slot_num
 
     def _init_led_notify(self, eventtime):
         self.slot_led.notify()
@@ -243,9 +223,6 @@ class MMSSlot:
 
     def get_mms_buffer(self):
         return self.mms_buffer
-
-    def get_substitute_with(self):
-        return self.substitute_with
 
     # ---- MMS support ----
     def get_mms_slot_pin(self, pin_type):
@@ -368,7 +345,7 @@ class MMSSlot:
         # else:
         #     self._handle_generic_mms_exception(exception)
 
-    def _handler_mms_stepper_running(self):
+    def _handle_mms_stepper_running(self):
         self.slot_led.deactivate_blinking()
         # Remove handler
         # printer_adapter.register_mms_stepper_running(handler=None)

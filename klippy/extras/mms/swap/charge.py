@@ -70,7 +70,7 @@ class MMSCharge:
 
         # State tracking
         self._is_running = False
-        self._charging_slot_num = None
+        self._charged_slot_num = None
         # Task state
         # self._task_end = False
         # self._task_success = False
@@ -89,7 +89,7 @@ class MMSCharge:
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
         self.mms_delivery = printer_adapter.get_mms_delivery()
-        self.mms_filament_fracture = self.mms.get_mms_filament_fracture()
+        self.mms_fil_detection = self.mms.get_mms_filament_detection()
 
     def _initialize_gcode(self):
         commands = [
@@ -118,12 +118,12 @@ class MMSCharge:
         finally:
             self._is_running = False
 
-    def get_charging_slot(self):
-        return self._charging_slot_num
+    def get_charged_slot(self):
+        return self._charged_slot_num
 
     def teardown(self):
         self._is_running = False
-        self._charging_slot_num = None
+        self._charged_slot_num = None
 
     # ---- Control ----
     def pause(self, period_seconds):
@@ -190,7 +190,7 @@ class MMSCharge:
 
         # # No retry loop
         with wait_func():
-            with self.mms_filament_fracture.monitor_while_homing(slot_num):
+            with self.mms_fil_detection.monitor():
                 mms_drive.update_focus_slot(slot_num)
                 mms_drive.manual_home(
                     distance = abs(distance),
@@ -198,11 +198,20 @@ class MMSCharge:
                     forward = True, trigger = True,
                     endstop_pair_lst = endstop_pair_lst,
                 )
-                # if mms_drive.move_is_completed(result):
-                # if mms_slot.outlet.is_released():
-                self._drip_extrude_end = True
-                    # return True
-        # return False
+            # if mms_drive.move_is_completed(result):
+            # if mms_slot.outlet.is_released():
+            self._drip_extrude_end = True
+
+    def _async_unload(self, slot_num):
+        func = self.mms_delivery.unload_to_gate
+        params = {"slot_num":slot_num}
+        async_task = AsyncTask()
+        try:
+            if async_task.setup(func, params):
+                async_task.start()
+        except Exception as e:
+            # self.log_error(f"slot[{slot_num}] async unload error: {e}")
+            raise
 
     # ---- Extruder control ----
     def _drip_extrude(
@@ -364,13 +373,13 @@ class MMSCharge:
         # Check filament is properly loaded into extruder
         if not self._extrude_to_release_outlet(slot_num):
             # Not properly loaded, simple unload
+            # Raise DeliveryFailedError if fail
+            self._async_unload(slot_num)
             extruder_adapter.retract(
                 self.distance_unload,
                 self.extrude_speed,
                 wait=False
             )
-            # Raise DeliveryFailedError if fail
-            self.mms_delivery.unload_to_gate(slot_num)
             return False
 
         self.log_info_s(f"{log_prefix} finish")
@@ -425,37 +434,40 @@ class MMSCharge:
         log_prefix = f"slot[{slot_num}] charge"
         self.log_info_s(f"{log_prefix} begin")
 
-        # Load to make sure Outlet or Entry is triggered
-        if not self.mms_delivery.mms_load(slot_num):
-            self.log_warning(f"{log_prefix} load prepare failed")
-            return False
-
         with self._charge_is_running():
             try:
                 # Make sure mms_buffer is idle
                 self._pause_mms_buffer(slot_num)
 
-                # Careful charge
-                success = self._careful_charge(slot_num)
+                retry_times = self.mms.get_retry_times()
+                for i in range(retry_times):
 
-                # Standard charge if not success
-                if not success:
-                    retry_times = self.mms.get_retry_times()
+                    # Load to make sure Outlet or Entry is triggered
+                    if not self.mms_delivery.mms_load(slot_num):
+                        self.log_warning(f"{log_prefix} load prepare failed")
+                        return False
+
+                    # Careful charge
+                    # if self._careful_charge(slot_num):
+                    #     self._handle_charge_success(slot_num)
+                    #     return True
+                    self._careful_charge(slot_num)
+
+                    # Standard charge
+                    if self._standard_charge(slot_num):
+                        self._handle_charge_success(slot_num)
+                        return True
+
                     # Retry loop
-                    for i in range(retry_times):
-                        success = self._standard_charge(slot_num)
-                        if success:
-                            break
-                        self.log_info(
-                            f"{log_prefix} retry {i+1}/{retry_times} ..."
-                        )
+                    self.log_info(
+                        f"{log_prefix} retry {i+1}/{retry_times} ..."
+                    )
 
-                    # Retry end
-                    if not success:
-                        raise ChargeFailedError(
-                            f"{log_prefix} failed after all retries",
-                            self.mms.get_mms_slot(slot_num)
-                        )
+                # Retry end, not success
+                raise ChargeFailedError(
+                    f"{log_prefix} failed after all retries",
+                    self.mms.get_mms_slot(slot_num)
+                )
 
             except ChargeFailedError as e:
                 self.log_warning(e)
@@ -465,10 +477,10 @@ class MMSCharge:
                 self.log_error(f"{log_prefix} error: {e}")
                 return False
 
-        self._charging_slot_num = slot_num
-        self.log_info_s(f"{log_prefix} finish")
+    def _handle_charge_success(self, slot_num):
+        self._charged_slot_num = slot_num
+        self.log_info_s(f"slot[{slot_num}] charge finish")
         self._exec_custom_macro(self.custom_after, "after")
-        return True
 
     # ---- GCode ----
     @log_time_cost("log_info_s")

@@ -266,7 +266,8 @@ class RFIDManager:
                     # Cached the full blocks data
                     cache_key = self.cache.gen_key(uid_s)
                     self.cache.add(cache_key, blocks_read)
-                    self.log_info_s(f"RFID data success cached with UID: {uid_s}")
+                    self.log_info_s(
+                        f"RFID data success cached with UID: {uid_s}")
                     # for i,data in blocks_read:
                     #     self.log_info_s(f"Block {i}: {data}")
 

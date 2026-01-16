@@ -1,6 +1,6 @@
 # Exceptions and Signals for MMS
 #
-# Copyright (C) 2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2025-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -64,6 +64,18 @@ class ChargeFailedError(MMSException):
 class PurgeFailedError(MMSException):
     """
     Raised when SLOT Charge is failed.
+    """
+
+
+class FilamentDetectionFailedError(MMSException):
+    """
+    Raised when Filament Detection is failed.
+    """
+
+
+class EndlessSpoolFailedError(MMSException):
+    """
+    Raised when Endless Spool is failed.
     """
 
 
