@@ -53,6 +53,7 @@ ks_dst_dir="${HOME}/${VIVID_DIR}"
 screen="$ks_dir/screen.py"
 gcodes="$ks_dir/panels/gcodes.py"
 
+g_old_config_path=""
 g_vivid_id=""
 g_buffer_id=""
 g_cutter=0
@@ -452,6 +453,7 @@ copy_config_files() {
     if [ -d "${dst_dir}" ]; then
         mv "${dst_dir}" "${next_dst_dir}"
         log_echo "${INFO}Old config backup completed: ${PURPLE}${next_dst_dir}"
+        g_old_config_path="${next_dst_dir}/mms/mms.cfg"
     fi
     log_echo "${INFO}Copying ${PURPLE}${src_dir}${INFO} into ${PURPLE}${dst_dir}${INFO} directory..."
     cp -r "${src_dir}" "${dst_dir}"
@@ -628,9 +630,9 @@ set_user_config() {
     fi
 
     # purge_brush
-    if [ "${g_purge_brush}" -eq 0 ]; then
-        sed -i -e "s|enable:                  1|enable:                  0|g" "${purge_brush_path}"
-    else
+    export purge=${g_purge_brush}
+    export brush=${g_purge_brush}
+    if [ "${g_purge_brush}" -eq 1 ]; then
         log_echo "${PURPLE}purge${INFO} and ${PURPLE}brush${INFO} has been enabled, please configure the specific position in ${PURPLE}${purge_brush_path}"
     fi
 
@@ -639,15 +641,37 @@ set_user_config() {
         log_echo "${WARNING}ViViD MCU serial id has not been set. Please modify it manually in ${PURPLE}${mms_path}"
     else
         log_echo "${INFO}ViViD Serial ID: ${PURPLE}${g_vivid_id}"
-        sed -i "s|usb-Klipper_stm32g0b1xx_vivid-if00|${g_vivid_id}|g" "${mms_path}"
+        export vivid_id="/dev/serial/by-id/${g_vivid_id}"
     fi
     # buffer seral id
     if [ -z "${g_buffer_id}" ]; then
         log_echo "${WARNING}Buffer MCU serial id has not been set. Please modify it manually in ${PURPLE}${mms_path}"
     else
         log_echo "${INFO}Buffer Serial ID: ${PURPLE}${g_buffer_id}"
-        sed -i "s|usb-Klipper_stm32f042x6_buffer-if00|${g_buffer_id}|g" "${mms_path}"
+        export buffer_id="/dev/serial/by-id/${g_buffer_id}"
     fi
+
+    json_str=`python3 -c '
+import json
+import os
+data = {
+    "mcu buffer": {
+        "serial": os.environ.get("buffer_id", None),
+    },
+    "mcu vivid": {
+        "serial": os.environ.get("vivid_id", None),
+    },
+    "mms purge": {
+        "enable": os.environ.get("purge", None),
+    },
+    "mms brush": {
+        "enable": os.environ.get("brush", None),
+    }
+}
+print(json.dumps(data, ensure_ascii=False))
+'`
+
+    python3 "${SHELL_DIR}/scripts/copy_config.py" "${mms_path}" "${g_old_config_path}" "${json_str}"
 }
 
 cleanup_before_install() {
