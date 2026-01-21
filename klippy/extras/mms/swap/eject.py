@@ -88,6 +88,7 @@ class MMSEject:
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
         self.mms_delivery = printer_adapter.get_mms_delivery()
+        self.mms_charge = printer_adapter.get_mms_charge()
         self.mms_cut = printer_adapter.get_mms_cut()
         self.mms_purge = printer_adapter.get_mms_purge()
 
@@ -389,6 +390,7 @@ class MMSEject:
 
         try:
             self._standard_eject(check_entry)
+            self.mms_charge.teardown()
         except EjectFailedError as e:
             self.log_warning(e)
             return False

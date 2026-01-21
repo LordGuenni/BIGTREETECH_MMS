@@ -1,6 +1,6 @@
 # Adapter of printer's Neopixel
 #
-# Copyright (C) 2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2025-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -12,10 +12,12 @@ class NeopixelAdapter(BaseAdapter):
     def __init__(self, led_name):
         super().__init__()
         self.led_name = led_name
+        self.mutex = self.reactor.mutex()
 
     def _setup_logger(self):
         mms_logger = printer_adapter.get_mms_logger()
-        self.log_error_s = mms_logger.create_log_error(console_output=False)
+        self.log_warning_s = mms_logger.create_log_warning(
+            console_output=False)
 
     def _get_neopixel(self):
         return self.safe_get(self.led_name)
@@ -28,11 +30,24 @@ class NeopixelAdapter(BaseAdapter):
 
     def update_leds(self, color_data):
         # Attempt to transmit the updated LED colors
-        try:
-            self._get_neopixel().update_leds(
-                led_state=color_data, print_time=None)
-        except Exception as e:
-            self.log_error_s(f"mms neopixel update error: {e}")
+
+        # New neopixel style would raise error frequently
+        # try:
+        #     self._get_neopixel().update_leds(
+        #         led_state=color_data, print_time=None)
+        # except Exception as e:
+        #     self.log_warning_s(f"mms neopixel update error: {e}")
+
+        # Use the old neopixel style, which update with mutex
+        neopixel = self._get_neopixel()
+        def reactor_bgfunc(eventtime):
+            with self.mutex:
+                neopixel.update_color_data(led_state=color_data)
+                try:
+                    neopixel.send_data()
+                except Exception as e:
+                    self.log_warning_s(f"mms neopixel update error: {e}")
+        self.reactor.register_callback(reactor_bgfunc)
 
 
 class NeopixelDispatch:

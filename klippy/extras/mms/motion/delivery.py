@@ -131,6 +131,7 @@ class MMSDelivery:
             # Stop commands
             ("MMS_STOP", self.cmd_MMS_STOP),
             # Diagnostic commands
+            ("MMS_SLOTS_WALK", self.cmd_MMS_SLOTS_WALK),
             ("MMS_SLOTS_CHECK", self.cmd_MMS_SLOTS_CHECK),
             ("MMS_SLOTS_LOOP", self.cmd_MMS_SLOTS_LOOP),
             # Command aliases
@@ -865,6 +866,48 @@ class MMSDelivery:
             and (mms_slot.entry_is_triggered() != trigger):
             raise Exception("Entry")
 
+    def mms_slots_walk(self):
+        self.log_info("slots walk begin")
+        # Walk through all SLOTs
+        for slot_num in self.mms.get_slot_nums():
+            if not self._can_walk():
+                return False
+
+            try:
+                self.unload_loading_slots(skip_slot=slot_num)
+                self.pause(1)
+
+                mms_slot = self.mms.get_mms_slot(slot_num)
+                if mms_slot.entry_is_set():
+                    self.load_to_entry(slot_num)
+                else:
+                    self.load_to_outlet(slot_num)
+
+            except DeliveryTerminateSignal:
+                self.log_info("slots walk terminated")
+                return False
+            except DeliveryReadyError:
+                pass
+            except Exception as e:
+                self.log_error(f"slots walk error:{e}")
+                return False
+
+        # Finally unload
+        if self._can_walk():
+            try:
+                self.unload_loading_slots()
+            except DeliveryTerminateSignal:
+                self.log_info("slots walk terminated")
+                return False
+            except DeliveryReadyError:
+                pass
+            except Exception as e:
+                self.log_error(f"slots walk error:{e}")
+                return False
+
+        self.log_info("slots walk finish")
+        return True
+
     def mms_slots_check(self):
         self.log_info("slots check begin")
         # Walk through all SLOTs and check every Pin
@@ -1105,6 +1148,17 @@ class MMSDelivery:
                 self.mms_unselect,
                 {"slot_num":slot_num}
             )
+
+    def cmd_MMS_SLOTS_WALK(self, gcmd=None):
+        if not self.mms.cmd_can_exec():
+            self.log_warning("MMS_SLOTS_WALK can not execute now")
+            return
+
+        should_wait = gcmd.get_int("WAIT", default=0)
+        if bool(should_wait):
+            self.mms_slots_walk()
+        else:
+            self.deliver_async_task(self.mms_slots_walk)
 
     def cmd_MMS_SLOTS_CHECK(self, gcmd=None):
         if not self.mms.cmd_can_exec():

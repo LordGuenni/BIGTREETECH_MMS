@@ -1,5 +1,64 @@
 # MMS 更新日志
 
+## Ver 0.1.0394
+
+- ExtruderAdapter extruder_speed mm/min -> mm/s 统一处理
+- NeopixelAdapter 参考旧版 Neopixel(klipper/extras/neopixel.py) 的更新机制，在 NeopixelAdapter 里使用 Mutex 锁管理更新，解决 Neopixel 频繁更新报错问题
+- Delivery MMS_SLOTS_WALK 复归，变回单独命令；和 MMS_SLOTS_CHECK 不同逻辑
+
+## Ver 0.1.0393
+
+- Charge 迭代，修复失败后（重试前）退料期间的漫长等待问题
+- ExtruderAdapter 增设 drip_extrude()/drip_retract() 函数
+
+## Ver 0.1.0392
+
+- PinsAdapter 修复 Pin 复合上拉和取反同时声明报错问题
+
+## Ver 0.1.0391
+
+- 修正 mms-heater.cfg 中的配置
+
+## Ver 0.1.0388 ~ 0.1.0390
+
+- Endless Spool 迭代调整
+
+## Ver 0.1.0387
+
+- Charge 迭代，流程调整为 Careful Charge 也包含在重试循环里面
+
+## Ver 0.1.0386
+
+- MMS log_status() 增加 charged_slot 的输出
+- Exceptions 新增 Filament Detection/Endless Spool 用的异常
+- Observer 新增 unregister_xxx_callback
+- Endless Spool 补全异常逻辑和日志输出
+- MMS PAUSE 新增暂停时 Disable Stepper Drive/Selector
+
+## Ver 0.1.0385
+
+- mms_charge.charged_slot 作为判断当前目标 SLOT 的最高优先级依据
+- Endless Spool 模块迭代测试
+
+## Ver 0.1.0384
+
+- 删除 SLOT Substitute 模块
+- 新增 Endless Spool 模块
+- 修复 Extend 后扩展的 MMS SLOT 被重复登记至列表的问题
+
+## Ver 0.1.0383
+
+- MMS PAUSE/RESUME 增加记录/还原 Selecting SLOTs 功能
+
+## Ver 0.1.0382
+
+- Filament Detection 模块迭代
+
+## Ver 0.1.0381
+
+- 删除 Filament Fracture 相关逻辑
+- 新增 Filament Detection 模块
+
 ## Ver 0.1.0380
 
 - 优化 Klipper shutdown 时 MMS last_breath 的日志输出格式。

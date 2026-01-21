@@ -1,4 +1,62 @@
 # MMS Change Log
+## Ver 0.1.0394
+
+- ExtruderAdapter extruder_speed mm/min -> mm/s unified processing.
+- NeopixelAdapter references the update mechanism of the old Neopixel (klipper/extras/neopixel.py), uses Mutex lock for management in NeopixelAdapter to resolve frequent Neopixel update errors.
+- Delivery MMS_SLOTS_WALK homing, changed back to a separate command; different logic from MMS_SLOTS_CHECK.
+
+## Ver 0.1.0393
+
+- Charge iteration, fixed the long wait issue during retraction after a failure (before retry).
+- ExtruderAdapter added drip_extrude()/drip_retract() functions.
+
+## Ver 0.1.0392
+
+- PinsAdapter fixed the error when declaring both Pin pull-up and inversion simultaneously.
+
+## Ver 0.1.0391
+
+- Corrected configuration in mms-heater.cfg.
+
+## Ver 0.1.0388 ~ 0.1.0390
+
+- Endless Spool iteration adjustments.
+
+## Ver 0.1.0387
+
+- Charge iteration, process adjusted to include Careful Charge within the retry loop.
+
+## Ver 0.1.0386
+
+- MMS log_status() added output for charged_slot.
+- Exceptions added new exceptions for Filament Detection/Endless Spool
+- Observer added unregister_xxx_callback.
+- Endless Spool completed exception logic and log output.
+- MMS PAUSE added disabling Stepper Drive/Selector when pausing.
+
+## Ver 0.1.0385
+
+- mms_charge.charged_slot used as the highest priority basis for judging the current target SLOT.
+- Endless Spool module iteration testing.
+
+## Ver 0.1.0384
+
+- Deleted SLOT Substitute module.
+- Added Endless Spool module.
+- Fixed issue where expanded MMS SLOTs after Extend were repeatedly registered to the list.
+
+## Ver 0.1.0383
+
+- MMS PAUSE/RESUME added functionality to record/restore Selecting SLOTs.
+
+## Ver 0.1.0382
+
+- Filament Detection module iteration.
+
+## Ver 0.1.0381
+
+- Deleted Filament Fracture related logic.
+- Added Filament Detection module.
 
 ## Ver 0.1.0380
 

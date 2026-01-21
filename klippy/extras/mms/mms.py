@@ -36,7 +36,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0391"
+    version: str = "0.1.0394"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -1042,7 +1042,6 @@ class MMS:
 
 
 def load_config(config):
-    # return MMS(config)
     mms = MMS(config)
     printer_adapter.notify_mms_initialized(mms)
     return mms

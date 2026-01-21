@@ -28,9 +28,10 @@ class PinsAdapter(BaseAdapter):
         return self.safe_get(self._obj_name)
 
     def allow_multi_use_pin(self, mcu_pin):
-        pin_desc = mcu_pin[1:] \
-            if mcu_pin.startswith(('!', '~', '^')) \
-            else mcu_pin
+        # pin_desc = mcu_pin[1:] \
+        #     if mcu_pin.startswith(('!', '~', '^')) \
+        #     else mcu_pin
+        pin_desc = mcu_pin.lstrip('!~^')
         self._get_pins().allow_multi_use_pin(pin_desc)
         # self._get_pins().allow_multi_use_pin(mcu_pin)
 

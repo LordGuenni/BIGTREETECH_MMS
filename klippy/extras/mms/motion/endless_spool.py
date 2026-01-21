@@ -5,7 +5,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
-# from dataclasses import dataclass
+from dataclasses import dataclass
 
 from ..adapters import (
     extruder_adapter,
@@ -16,9 +16,12 @@ from ..core.exceptions import EndlessSpoolFailedError
 from ..core.slot_pin import PinType
 
 
-# @dataclass(frozen=True)
-# class MMSEndlessSpoolConfig:
-#     log_flag: str = "==O=="
+@dataclass(frozen=True)
+class MMSEndlessSpoolConfig:
+    log_flag: str = "==O=="
+    truncate_distance: float = 2000
+    truncate_orphan_distance: float = 200
+    extrude_distance_max: float = 5000
 
 
 class MMSEndlessSpool:
@@ -29,10 +32,11 @@ class MMSEndlessSpool:
             2:3,
             3:0,
         }
-        self.log_flag = "==O=="
-        self.truncate_distance = 2000
-        self.truncate_orphan_distance = 200
-        self.extrude_distance_max = 5000
+        es_config = MMSEndlessSpoolConfig()
+        self.log_flag = es_config.log_flag
+        self.truncate_distance = es_config.truncate_distance
+        self.truncate_orphan_distance = es_config.truncate_orphan_distance
+        self.extrude_distance_max = es_config.extrude_distance_max
 
         self.pin_type = PinType()
 

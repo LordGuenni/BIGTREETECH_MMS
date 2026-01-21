@@ -71,11 +71,10 @@ class MMSCharge:
         # State tracking
         self._is_running = False
         self._charged_slot_num = None
-        # Task state
-        # self._task_end = False
-        # self._task_success = False
         # Extruder state
         self._drip_extrude_end = False
+        self._drip_retract_end = False
+        self._careful_retract_distance = 200
 
         printer_adapter.register_klippy_ready(
             self._handle_klippy_ready)
@@ -126,9 +125,6 @@ class MMSCharge:
         self._charged_slot_num = None
 
     # ---- Control ----
-    def pause(self, period_seconds):
-        self.reactor.pause(self.reactor.monotonic() + period_seconds)
-
     def _exec_custom_macro(self, macro, position):
         if macro:
             self.log_info(
@@ -148,48 +144,24 @@ class MMSCharge:
         is_idle = self.mms_delivery.wait_mms_selector_and_drive(slot_num)
         if not is_idle:
             raise ChargeFailedError(
-                f"slot[{slot_num}] wait selector or drive stepper idle timeout",
+                f"slot[{slot_num}] wait selector or drive "
+                "stepper idle timeout",
                 mms_slot
             )
         return mms_buffer
 
     # ---- Async task ----
-    # def _init_task_state(self):
-    #     self._task_end = False
-    #     self._task_success = False
-
-    # def _handle_task_end(self, result):
-    #     self._task_end = True
-    #     # result is None means task raise an error(maybe retry failed)
-    #     self._task_success = True if result not in (None, False) else False
-
-    def _async_careful_load(self, slot_num, distance):
-        # Setup and start careful load in background
-        func = self._careful_load
-        params = {"slot_num":slot_num, "distance":distance}
-        # callback = self._handle_task_end
-        callback = None
-        async_task = AsyncTask()
-        try:
-            # self._init_task_state()
-            if async_task.setup(func, params, callback):
-                async_task.start()
-        except Exception as e:
-            self.log_error(f"slot[{slot_num}] async careful load error: {e}")
-            return False
-        return True
-
     def _careful_load(self, slot_num, distance):
         mms_slot = self.mms.get_mms_slot(slot_num)
         mms_drive = mms_slot.get_mms_drive()
         pin_type = mms_slot.outlet.get_pin_type()
         wait_func = mms_slot.get_wait_func(pin_type)
         endstop_pair_lst = mms_slot.format_endstop_pair(pin_type)
-        # Calculate speed
-        speed = self.extrude_speed / 60
+        speed = extruder_adapter.transform_speed(self.extrude_speed)
 
         # # No retry loop
         with wait_func():
+            self._drip_extrude_end = False
             with self.mms_fil_detection.monitor():
                 mms_drive.update_focus_slot(slot_num)
                 mms_drive.manual_home(
@@ -198,40 +170,41 @@ class MMSCharge:
                     forward = True, trigger = True,
                     endstop_pair_lst = endstop_pair_lst,
                 )
-            # if mms_drive.move_is_completed(result):
-            # if mms_slot.outlet.is_released():
             self._drip_extrude_end = True
 
-    def _async_unload(self, slot_num):
-        func = self.mms_delivery.unload_to_gate
+    def _async_careful_load(self, slot_num, distance):
+        # Setup and start careful load in background
+        func = self._careful_load
+        params = {"slot_num":slot_num, "distance":distance}
+        async_task = AsyncTask()
+        try:
+            if async_task.setup(func, params):
+                async_task.start()
+        except Exception as e:
+            self.log_error(
+                f"slot[{slot_num}] async careful load error: {e}")
+            return False
+        return True
+
+    def _careful_unload(self, slot_num):
+        self._drip_retract_end = False
+        self.mms_delivery.unload_to_gate(slot_num)
+        self._drip_retract_end = True
+
+    def _async_careful_unload(self, slot_num):
+        func = self._careful_unload
         params = {"slot_num":slot_num}
         async_task = AsyncTask()
         try:
             if async_task.setup(func, params):
                 async_task.start()
         except Exception as e:
-            # self.log_error(f"slot[{slot_num}] async unload error: {e}")
-            raise
+            self.log_error(
+                f"slot[{slot_num}] async careful unload error: {e}")
+            return False
+        return True
 
     # ---- Extruder control ----
-    def _drip_extrude(
-        self, speed, drip_distance, drip_times, exit_condition
-    ):
-        # Sum distance of extruded
-        dist_extruded = 0
-
-        for i in range(int(drip_times)):
-            extruder_adapter.extrude(drip_distance, speed)
-            dist_extruded += drip_distance
-            # Condition achieved, exit
-            if exit_condition():
-                return True, dist_extruded
-            # Pause before next drip
-            self.pause(0.2)
-
-        # Finally false if condition is not achieved
-        return False, dist_extruded
-
     def _extrude_to_release_outlet(self, slot_num):
         mms_slot = self.mms.get_mms_slot(slot_num)
         if mms_slot.outlet.is_released():
@@ -243,7 +216,7 @@ class MMSCharge:
         self.log_info_s(
             f"slot[{slot_num}] extrude to release outlet begin"
         )
-        result, dist_extruded = self._drip_extrude(
+        result, dist_extruded = extruder_adapter.drip_extrude(
             speed = self.extrude_speed,
             drip_distance = self.extrude_distance,
             drip_times = self.extrude_times,
@@ -268,7 +241,7 @@ class MMSCharge:
         self.log_info_s(
             f"slot[{slot_num}] extrude to trigger buffer_runout begin"
         )
-        result, dist_extruded = self._drip_extrude(
+        result, dist_extruded = extruder_adapter.drip_extrude(
             speed = self.extrude_speed,
             drip_distance = self.extrude_distance,
             drip_times = self.extrude_times,
@@ -300,7 +273,7 @@ class MMSCharge:
 
         # Init flag
         self._drip_extrude_end = False
-        result, dist_extruded = self._drip_extrude(
+        result, dist_extruded = extruder_adapter.drip_extrude(
             speed = self.extrude_speed,
             drip_distance = self.drip_extrude_distance,
             drip_times = int(distance_total // self.drip_extrude_distance),
@@ -311,7 +284,38 @@ class MMSCharge:
 
         self.log_info_s(
             f"slot[{slot_num}] exit careful extrude, "
-            f"extruded {dist_extruded} mm"
+            f"result:{result}, extruded:{dist_extruded} mm"
+        )
+        return result
+
+    def _careful_retract(self, slot_num, distance_total):
+        mms_slot = self.mms.get_mms_slot(slot_num)
+
+        # Exit condition func
+        def exit_drip():
+            return self._drip_retract_end \
+                or mms_slot.gate.is_released()
+
+        # Check
+        if mms_slot.gate.is_released():
+            self.log_warning(
+                f"slot[{slot_num}] careful retract failed, "
+                "gate is already released"
+            )
+            return False
+
+        self._drip_retract_end = False
+        result, dist_extruded = extruder_adapter.drip_retract(
+            speed = self.extrude_speed,
+            drip_distance = self.drip_extrude_distance,
+            drip_times = int(distance_total // self.drip_extrude_distance),
+            exit_condition = exit_drip
+        )
+        self._drip_retract_end = False
+
+        self.log_info_s(
+            f"slot[{slot_num}] exit careful retract, "
+            f"result:{result}, retracted:{dist_extruded} mm"
         )
         return result
 
@@ -372,14 +376,21 @@ class MMSCharge:
 
         # Check filament is properly loaded into extruder
         if not self._extrude_to_release_outlet(slot_num):
-            # Not properly loaded, simple unload
-            # Raise DeliveryFailedError if fail
-            self._async_unload(slot_num)
-            extruder_adapter.retract(
-                self.distance_unload,
-                self.extrude_speed,
-                wait=False
-            )
+            # Not properly loaded, careful unload and retract
+            # Load task(async)
+            if not self._async_careful_unload(slot_num):
+                raise ChargeFailedError(
+                    f"{log_prefix} async careful unload failed",
+                    mms_slot
+                )
+            # Extruder task(block)
+            if not self._careful_retract(
+                    slot_num, self._careful_retract_distance
+                ):
+                raise ChargeFailedError(
+                    f"{log_prefix} careful retract failed",
+                    mms_slot
+                )
             return False
 
         self.log_info_s(f"{log_prefix} finish")
@@ -448,9 +459,8 @@ class MMSCharge:
                         return False
 
                     # Careful charge
-                    # if self._careful_charge(slot_num):
-                    #     self._handle_charge_success(slot_num)
-                    #     return True
+                    # No matter success or fail,
+                    # continue with standard charge
                     self._careful_charge(slot_num)
 
                     # Standard charge

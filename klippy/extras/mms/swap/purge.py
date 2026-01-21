@@ -237,16 +237,15 @@ class MMSPurge:
         return True
 
     def _purge_feed_task(self, slot_num, distance):
-        distance = abs(distance)
-        spd = self.purge_speed / 60
-        # self.mms_delivery.mms_drip_move(slot_num, abs(distance), spd, spd)
-        # self.mms_delivery.mms_move(slot_num, abs(distance), spd, spd)
-        # self.mms_delivery.move_forward(slot_num, abs(distance), spd, spd)
         mms_slot = self.mms.get_mms_slot(slot_num)
         mms_drive = mms_slot.get_mms_drive()
         mms_drive.update_focus_slot(slot_num)
+
         # No select method
+        distance = abs(distance)
+        spd = extruder_adapter.transform_speed(self.purge_speed)
         mms_drive.manual_move(distance, spd, spd)
+
         self.log_info_s(f"slot[{slot_num}] deliver distance={distance:.2f} mm")
 
     def _async_cold_pull(self, slot_num, distance, speed):
@@ -325,7 +324,8 @@ class MMSPurge:
         # Drive stepper params
         unload_dist = total_retracted_dist - mms_buffer.get_spring_stroke()
         # Unit: pulse_speed::mm/min -> unload_speed::mm/s
-        unload_speed = self.pulse_speed / 60 * 0.5
+        unload_speed = extruder_adapter.transform_speed(
+            self.pulse_speed) * 0.5
 
         self.log_info_s(f"{log_prefix} begin")
 
@@ -365,7 +365,8 @@ class MMSPurge:
         #     mms_buffer.get_spring_stroke()
         # )
         distance = abs(self.nozzle_priming_dist)
-        move_speed = self.nozzle_priming_speed / 60
+        move_speed = extruder_adapter.transform_speed(
+            self.nozzle_priming_speed)
         move_time = distance / move_speed
 
         self._async_move_forward(slot_num, distance, move_speed)
@@ -437,7 +438,7 @@ class MMSPurge:
         solidify_wait = 3.0
         pull_length = 150
         pull_speed = 1200
-        unload_speed = 20 # 1200/60
+        unload_speed = extruder_adapter.transform_speed(pull_speed)
 
         self.log_info_s(f"slot[{slot_num}] cold pull begin")
 

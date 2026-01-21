@@ -71,6 +71,11 @@ class ExtruderAdapter(BaseAdapter):
         return True
 
     # ---- Extrude/Retract ----
+    def pause(self, period_seconds):
+        self.reactor.pause(
+            self.reactor.monotonic() + period_seconds
+        )
+
     @contextmanager
     def _apply_disable_absolute_extrude(self):
         gm_adp.save_absolute_extrude()
@@ -104,6 +109,38 @@ class ExtruderAdapter(BaseAdapter):
             f"wait: {wait}"
         )
         self._move(-abs(distance), speed, wait)
+
+    def _drip_action(
+        self, action, speed, drip_distance, drip_times, exit_condition
+    ):
+        # Sum distance
+        dist_total = 0
+
+        for i in range(int(drip_times)):
+            action(distance=drip_distance, speed=speed)
+            dist_total += drip_distance
+            # Condition achieved, exit
+            if exit_condition():
+                return True, dist_total
+            # Pause before next drip
+            self.pause(0.2)
+
+        # Finally false if condition is not achieved
+        return False, dist_total
+
+    def drip_extrude(
+        self, speed, drip_distance, drip_times, exit_condition
+    ):
+        return self._drip_action(
+            self.extrude, speed, drip_distance, drip_times, exit_condition
+        )
+
+    def drip_retract(
+        self, speed, drip_distance, drip_times, exit_condition
+    ):
+        return self._drip_action(
+            self.retract, speed, drip_distance, drip_times, exit_condition
+        )
 
     # ---- Extruder Status/Config ----
     def get_extruder_status(self):
@@ -143,12 +180,12 @@ class ExtruderAdapter(BaseAdapter):
         # The speed of gcode move is in mm/min
         gm_speed = gm_adp.get_current_status().get("speed")
         # Transform speed from mm/min to mm/s
-        return gm_speed / 60.
+        return self.transform_speed(gm_speed)
 
     def get_position_speed(self):
         position = gm_adp.get_toolhead_position().get("e")
         speed = gm_adp.get_current_status().get("speed")
-        return position, speed / 60.
+        return position, self.transform_speed(speed)
 
     def get_velocity(self):
         return mr_adp.get_extruder_velocity()
@@ -187,6 +224,12 @@ class ExtruderAdapter(BaseAdapter):
         move_dct = mr_adp.get_extruder_move(
             self.get_extruder_name(), self.reactor.monotonic())
         return move_dct
+
+    def transform_speed(self, extruder_speed):
+        # Transform speed from mm/min to mm/s
+        # 'extruder_speed' in [mm/min]
+        # transform to [mm/s]
+        return extruder_speed / 60.
 
 
 # Global instance for singleton
