@@ -202,6 +202,11 @@ class MMSBrush:
             self.log_warning("peck_point is not available, return")
             return False
 
+        if not self.peck_times:
+            # Disable peck with self.peck_times == 0
+            # Directly return True
+            return True
+
         with self._brush_is_running():
             try:
                 toolhead_adapter.move_xy(

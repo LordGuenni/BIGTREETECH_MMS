@@ -95,6 +95,7 @@ class MMSSlot:
         # RFID, init after klippy is connected
         self.slot_rfid = None
 
+        self._is_extended = False
         self._is_ready = False
 
         # Initialize Pins
@@ -223,6 +224,12 @@ class MMSSlot:
 
     def get_mms_buffer(self):
         return self.mms_buffer
+
+    def mark_is_extended(self):
+        self._is_extended = True
+
+    def is_extended(self):
+        return self._is_extended
 
     # ---- MMS support ----
     def get_mms_slot_pin(self, pin_type):

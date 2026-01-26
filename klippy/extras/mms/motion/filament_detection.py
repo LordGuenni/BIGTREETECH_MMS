@@ -35,6 +35,8 @@ class MMSFilamentDetection:
         self._enable = False
         self._enable_config = False
         self._activating = False
+        self._activating_slot_num = None
+
         # Klippy event handler
         printer_adapter.register_klippy_ready(
             self._handle_klippy_ready)
@@ -52,13 +54,6 @@ class MMSFilamentDetection:
         self.mms_pause = self.mms.get_mms_pause()
         self._enable = self.mms.filament_detection_is_enabled()
         self._enable_config = self._enable
-
-    # def _initialize_gcode(self):
-    #     commands = [
-    #         ("MMS_FD1", self.cmd_MMS_FILAMENT_DETECTION_ACTIVATE),
-    #         ("MMS_FD0", self.cmd_MMS_FILAMENT_DETECTION_DEACTIVATE),
-    #     ]
-    #     gcode_adapter.bulk_register(commands)
 
     def _initialize_loggers(self):
         mms_logger = printer_adapter.get_mms_logger()
@@ -81,7 +76,6 @@ class MMSFilamentDetection:
     def _register(self):
         if not self._enable:
             return
-
         for mms_slot in self.mms.get_mms_slots():
             slot_num = mms_slot.get_num()
             mms_slot.inlet.add_release_callback(
@@ -96,7 +90,6 @@ class MMSFilamentDetection:
     def _unregister(self):
         # if not self._enable:
         #     return
-
         for mms_slot in self.mms.get_mms_slots():
             mms_slot.inlet.remove_release_callback(
                 callback=self._handle_inlet_is_released
@@ -107,6 +100,11 @@ class MMSFilamentDetection:
 
     # ---- Handlers ----
     def _common_handler(self, slot_num, pin_type):
+        if not self._enable \
+            or not self._activating \
+            or slot_num != self._activating_slot_num:
+            return
+
         msg = f"slot[{slot_num}] filament detection: " + \
             f"{pin_type} is released {self.log_flag}"
 
@@ -116,13 +114,10 @@ class MMSFilamentDetection:
             self.log_warning_s(msg)
             gcode_adapter.respond_error(msg)
 
-            # Stop delivery and disable MMS Steppers
+            # Stop delivery
             self.mms_delivery.mms_stop(slot_num)
-            # if self.mms_delivery.wait_mms_selector_and_drive(slot_num):
-            #     for mms_drive in self.mms.get_mms_drives():
-            #         mms_drive.disable()
-            #     for mms_selector in self.mms.get_mms_selectors():
-            #         mms_selector.disable()
+            # Free selecting slot
+            self.mms_delivery.mms_unselect()
 
             if self.mms.printer_is_printing():
                 # Pause print
@@ -144,19 +139,24 @@ class MMSFilamentDetection:
             self.log_error_s(f"{msg} error: {e}")
 
     def _handle_inlet_is_released(self, slot_num):
-        if self._activating:
-            self._common_handler(slot_num, self.pin_type.inlet)
+        self._common_handler(slot_num, self.pin_type.inlet)
 
     def _handle_gate_is_released(self, slot_num):
-        if self._activating:
-            self._common_handler(slot_num, self.pin_type.gate)
+        self._common_handler(slot_num, self.pin_type.gate)
 
     def force_handle_inlet_is_released(self, slot_num):
         if not self._enable:
             return
+
+        org_slot_num = self._activating_slot_num
         org_status = self._activating
+
         self._activating = True
+        self._activating_slot_num = slot_num
+
         self._handle_inlet_is_released(slot_num)
+
+        self._activating_slot_num = org_slot_num
         self._activating = org_status
 
     # ---- Control ----
@@ -166,6 +166,7 @@ class MMSFilamentDetection:
 
     def disable(self):
         self._enable = False
+        self.deactivate()
         self.log_info_s("MMS Filament Detection is disabled")
 
     def recover(self):
@@ -175,39 +176,25 @@ class MMSFilamentDetection:
             else:
                 self.disable()
 
-    def activate(self):
+    def activate(self, slot_num):
         if not self._enable:
             return
         self._activating = True
-        self.log_info_s("MMS Filament Detection is activated")
+        self._activating_slot_num = slot_num
+        self.log_info_s(
+            f"slot[{slot_num}] filament detection is activated")
 
     def deactivate(self):
-        if not self._enable:
-            return
+        slot_num = self._activating_slot_num
         self._activating = False
-        self.log_info_s("MMS Filament Detection is deactivated")
+        self._activating_slot_num = None
+        self.log_info_s(
+            f"slot[{slot_num}] filament detection is deactivated")
 
     @contextmanager
-    def monitor(self):
-        self.activate()
+    def monitor(self, slot_num):
+        self.activate(slot_num)
         try:
             yield
         finally:
             self.deactivate()
-
-    # ---- GCode commands ----
-    # def cmd_MMS_FILAMENT_DETECTION_ACTIVATE(self, gcmd):
-    #     if not self._enable:
-    #         self.log_warning(
-    #             "MMS Filament Detection is disabled, activate failed"
-    #         )
-    #         return
-    #     self.activate()
-
-    # def cmd_MMS_FILAMENT_DETECTION_DEACTIVATE(self, gcmd):
-    #     if not self._enable:
-    #         self.log_warning(
-    #             "MMS Filament Detection is disabled, deactivate failed"
-    #         )
-    #         return
-    #     self.deactivate()

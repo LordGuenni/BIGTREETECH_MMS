@@ -1,5 +1,36 @@
 # MMS 更新日志
 
+## Ver 0.1.0399
+
+- MMS Brush 修复 Peck 未启用时仍会移动到 PeckPoint 的多余操作问题
+- MMS_EJECT 命令终段加入 MMS_UNSELECT
+
+## Ver 0.1.0398
+
+- 修复 NeopixelAdapter 未正确使用 ReactorMutex 导致软重启时 OverFlowError 并 Shutdown 的错误
+
+## Ver 0.1.0397
+
+- 代码清理，格式规范化
+- 文档补全
+
+## Ver 0.1.0396
+
+- MMS_DISABLE 增加 MMS_UNSELECT 步骤
+- BaseAdapter 增加 risk_get() 模式
+- FanAdapter 新增无 Fan/异名 Fan 支持
+
+## Ver 0.1.0395
+
+- Delivery Config 迭代为 core/config 的解析方式
+- 新增 MMS_UNSELECT，使 Stepper:Selector 不锁定任何 SLOT 的耗材；该命令支持 Extend VVD
+- 修复错误触发 Filament Detection 并在最后 Disable MMS Steppers 导致 TTC 的 Bug
+- Filament Detection 修复被非进料 SLOT 触发问题
+- FilamentDetection/EndlessSpool 原有为了解放 Selecting SLOT 的操作全部改为 MMS_UNSELECT
+- MMS_STOP 增加等待电机运动结束的步骤
+- Pause 取消在暂停时 Disable MMS Stepper 的操作
+- Autoload/Preload 修复无选中 SLOT 时报错的问题
+
 ## Ver 0.1.0394
 
 - ExtruderAdapter extruder_speed mm/min -> mm/s 统一处理

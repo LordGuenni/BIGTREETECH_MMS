@@ -407,6 +407,7 @@ class MMSEject:
         with toolhead_adapter.snapshot():
             with toolhead_adapter.safe_z_raise(self.z_raise):
                 self.mms_eject()
+                self.mms_delivery.unselect()
 
 
 def load_config(config):

@@ -162,7 +162,7 @@ class MMSCharge:
         # # No retry loop
         with wait_func():
             self._drip_extrude_end = False
-            with self.mms_fil_detection.monitor():
+            with self.mms_fil_detection.monitor(slot_num):
                 mms_drive.update_focus_slot(slot_num)
                 mms_drive.manual_home(
                     distance = abs(distance),

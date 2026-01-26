@@ -36,7 +36,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0394"
+    version: str = "0.1.0399"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -115,7 +115,7 @@ class MMS:
 
     # -- Initialize --
     def _initialize(self):
-        # slot_meta -> {
+        # slot_meta : {
         #     slot_num : {
         #         "outlet": ...,
         #         "buffer_runout": ...,
@@ -297,8 +297,12 @@ class MMS:
         # Extend mms_slot object list
         extend_mms_slots = mms_extend.get_mms_slots()
         for mms_slot in extend_mms_slots:
+            mms_slot.mark_is_extended()
             if mms_slot not in self.mms_slots:
                 self.mms_slots.append(mms_slot)
+        self.mms_slots.sort(
+            key=lambda mms_slot: mms_slot.get_num()
+        )
 
         # Extend MMS Buffer
         mms_buffer = self._parse_mms_buffer(
@@ -331,7 +335,9 @@ class MMS:
             mms_slot = printer_adapter.get_mms_slot(slot_num)
             if mms_slot not in self.mms_slots:
                 self.mms_slots.append(mms_slot)
-        self.mms_slots.sort(key=lambda mms_slot: mms_slot.get_num())
+        self.mms_slots.sort(
+            key=lambda mms_slot: mms_slot.get_num()
+        )
 
     def _initialize_gcode(self):
         commands = [
@@ -560,6 +566,14 @@ class MMS:
                 return mms_extend
         return None
 
+    def get_min_slot_nums(self):
+        slot_nums = [min(self.slot_num_lst)]
+        for mms_extend in self.mms_extends:
+            slot_num_min = min(mms_extend.get_slot_nums())
+            if slot_num_min not in slot_nums:
+                slot_nums.append(slot_num_min)
+        return slot_nums
+
     # -- Get slot_num --
     def get_slot_nums(self):
         return self.slot_num_lst
@@ -774,6 +788,9 @@ class MMS:
 
     def get_mms_slot(self, slot_num):
         error_msg = f"slot[{slot_num}] is not available"
+
+        if slot_num is None:
+            raise IndexError(error_msg)
 
         if not (0 <= slot_num < len(self.mms_slots)):
             raise IndexError(error_msg)

@@ -270,8 +270,7 @@ class MMSEndlessSpool:
 
         # # Make sure is not selecting
         # self.mms_delivery.deliver_async_task(
-        #     self.mms_delivery.select_another_slot,
-        #     {"slot_num":slot_num}
+        #     self.mms_delivery.unselect,
         # )
 
     def _handle_gate_is_released(self, slot_num):
@@ -294,7 +293,7 @@ class MMSEndlessSpool:
                 return
 
             # Make sure is not selecting
-            self.mms_delivery.select_another_slot(slot_num)
+            self.mms_delivery.mms_unselect()
             # Purge long distance to truncate bowden
             self.log_info(
                 f"slot[{slot_num}] purge "
@@ -411,7 +410,7 @@ class MMSEndlessSpool:
             distance_extruded = 0
 
             # Make sure is not selecting
-            self.mms_delivery.select_another_slot(slot_num)
+            self.mms_delivery.mms_unselect()
             # Extrude until entry is released
             while mms_slot.entry_is_triggered():
                 # Move to tray

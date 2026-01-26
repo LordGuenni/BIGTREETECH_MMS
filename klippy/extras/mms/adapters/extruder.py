@@ -71,11 +71,6 @@ class ExtruderAdapter(BaseAdapter):
         return True
 
     # ---- Extrude/Retract ----
-    def pause(self, period_seconds):
-        self.reactor.pause(
-            self.reactor.monotonic() + period_seconds
-        )
-
     @contextmanager
     def _apply_disable_absolute_extrude(self):
         gm_adp.save_absolute_extrude()

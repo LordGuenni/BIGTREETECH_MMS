@@ -12,7 +12,6 @@ class NeopixelAdapter(BaseAdapter):
     def __init__(self, led_name):
         super().__init__()
         self.led_name = led_name
-        self.mutex = self.reactor.mutex()
 
     def _setup_logger(self):
         mms_logger = printer_adapter.get_mms_logger()
@@ -41,7 +40,7 @@ class NeopixelAdapter(BaseAdapter):
         # Use the old neopixel style, which update with mutex
         neopixel = self._get_neopixel()
         def reactor_bgfunc(eventtime):
-            with self.mutex:
+            with self.get_mutex():
                 neopixel.update_color_data(led_state=color_data)
                 try:
                     neopixel.send_data()

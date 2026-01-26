@@ -6,6 +6,8 @@
 
 import logging
 
+from configfile import ConfigWrapper
+
 from ..klippy import GlobalKlippy
 
 
@@ -47,6 +49,14 @@ class BaseAdapter:
     def _setup_logger(self):
         return
 
+    def pause(self, period_seconds):
+        self.reactor.pause(
+            self.reactor.monotonic() + period_seconds
+        )
+
+    def get_mutex(self):
+        return self.reactor.mutex()
+
     # -- Get printer objects --
     def get_obj(self, obj_name):
         try:
@@ -59,8 +69,10 @@ class BaseAdapter:
         logging.warning(f"Object '{obj_name}' is creating from config...")
         try:
             return self.printer.load_object(config or self.config, obj_name)
+        except ConfigWrapper.error as e:
+            logging.error(f"Object '{obj_name}' config wrapper failed: {e}")
         except Exception as e:
-            raise RuntimeError(f"Object '{obj_name}' not exists in printer!!!")
+            raise RuntimeError(f"Object '{obj_name}' load failed: {e}")
 
     def safe_get(self, obj_name):
         # Check if dealing with a new printer
@@ -76,9 +88,15 @@ class BaseAdapter:
 
         # New printer or retrieval failed, create new object
         obj = self.get_obj(obj_name) or self.create_obj(obj_name)
+
         # Set the object as an attribute and validate availability
         assert obj, f"Object '{obj_name}' is unavailable in printer"
-
         # setattr(self, obj_name, obj)
 
+        return obj
+
+    def risk_get(self, obj_name):
+        # New printer or retrieval failed, create new object
+        obj = self.get_obj(obj_name) or self.create_obj(obj_name)
+        # obj could be None
         return obj

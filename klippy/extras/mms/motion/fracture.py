@@ -226,7 +226,7 @@ class MMSFilamentFracture:
             distance_extruded = 0
 
             # Make sure is not selecting
-            self.mms_delivery.select_another_slot(slot_num)
+            self.mms_delivery.mms_unselect()
             # Extrude until entry is released
             while mms_slot.entry_is_triggered():
                 # Move to tray
@@ -266,7 +266,7 @@ class MMSFilamentFracture:
         distance_extruded = 0
 
         # Make sure is not selecting
-        self.mms_delivery.select_another_slot(slot_num)
+        self.mms_delivery.mms_unselect()
 
         # Extrude until entry is released
         while distance_extruded < distance:

@@ -69,18 +69,18 @@ class MMSPause:
     def free_mms_paused(self):
         self._is_mms_paused = False
 
-    def _disable_mms_steppers(self):
-        slot_num = self.mms.get_current_slot()
+    # def _disable_mms_steppers(self):
+    #     slot_num = self.mms.get_current_slot()
 
-        for mms_drive in self.mms.get_mms_drives():
-            if mms_drive.is_running():
-                self.mms_delivery.wait_mms_drive(slot_num)
-            mms_drive.disable()
+    #     for mms_drive in self.mms.get_mms_drives():
+    #         if mms_drive.is_running():
+    #             self.mms_delivery.wait_mms_drive(slot_num)
+    #         mms_drive.disable()
 
-        for mms_selector in self.mms.get_mms_selectors():
-            if mms_selector.is_running():
-                self.mms_delivery.wait_mms_selector(slot_num)
-            mms_selector.disable()
+    #     for mms_selector in self.mms.get_mms_selectors():
+    #         if mms_selector.is_running():
+    #             self.mms_delivery.wait_mms_selector(slot_num)
+    #         mms_selector.disable()
 
     def mms_pause(self):
         if print_stats_adapter.is_paused_or_finished() \
@@ -99,19 +99,26 @@ class MMSPause:
             return False
 
         self.log_info("mms_pause begin")
+
         # Mark is paused by MMS
         self.set_mms_paused()
+
         # Log status of MMS and Toolhead
         self.mms.log_status()
         toolhead_adapter.log_snapshot()
+
         # Save target temp of extruder for resume
         toolhead_adapter.save_target_temp()
+
         # Always enable absolute coordinates(G90) before pause
         gcode_move_adapter.enable_absolute_coordinates()
+
         # Pause with gcode command
         self.gcode_pause()
+
         # Disable MMS Steppers
-        self._disable_mms_steppers()
+        # self._disable_mms_steppers()
+
         self.log_info("mms_pause finish")
         return True
 

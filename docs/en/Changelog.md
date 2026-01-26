@@ -1,4 +1,36 @@
 # MMS Change Log
+
+## Ver 0.1.0399
+
+- MMS Brush fixed issue where unnecessary movement to PeckPoint still occurred when Peck was not enabled
+- MMS_EJECT command end stage added MMS_UNSELECT
+
+## Ver 0.1.0398
+
+- Fixed error in NeopixelAdapter where ReactorMutex was not used correctly, causing OverFlowError and Shutdown during soft restart
+
+## Ver 0.1.0397
+
+- Code cleanup, format standardization
+- Documentation completion
+
+## Ver 0.1.0396
+
+- MMS_DISABLE added MMS_UNSELECT command
+- BaseAdapter added risk_get() mode
+- FanAdapter added support for no "[fan]" or "[fan]" configured with a different section name
+
+## Ver 0.1.0395
+
+-   Delivery Config iteration to use core/config parsing style
+-   Added MMS_UNSELECT, making Stepper:Selector not lock filament of any SLOT; this command supports Extend VVD
+-   Bug Fixed: Filament Detection was incorrectly triggered and disable MMS Steppers, finally caused TTC
+-   Filament Detection fixed issue of being triggered by non-feeding SLOT
+-   Operations in FilamentDetection/EndlessSpool originally intended to release selecting SLOT all updated to MMS_UNSELECT
+-   MMS_STOP added step to wait for motor movement to end
+-   Pause removed the operation of disabling MMS Stepper when paused
+-   Autoload/Preload fixed error log when no SLOT is selected
+
 ## Ver 0.1.0394
 
 - ExtruderAdapter extruder_speed mm/min -> mm/s unified processing.

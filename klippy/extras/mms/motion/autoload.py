@@ -269,17 +269,15 @@ class MMSAutoload:
         return True
 
     def mms_pre_load(self, slot_num):
-        selecting_slot = self._get_selecting_slot(slot_num)
-
         try:
-            if selecting_slot != slot_num:
+            if self._get_selecting_slot(slot_num) != slot_num:
                 self.mms_delivery.select_slot(slot_num)
 
             self.mms_delivery.pre_load_to_gate(slot_num)
             self.mms_delivery.unload_to_gate(slot_num)
 
-            if selecting_slot != slot_num:
-                self.mms_delivery.select_slot(selecting_slot)
+            if self._get_selecting_slot(slot_num) != slot_num:
+                self.mms_delivery.select_slot(slot_num)
 
         except DeliveryTerminateSignal:
             self.log_info(f"slot[{slot_num}] pre_load terminated")
