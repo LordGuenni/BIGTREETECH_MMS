@@ -387,6 +387,40 @@ def config_replace_option_val(filename, pos, new_content):
         print(f"Error: {e}")
         return False
 
+def is_outdated_val(section, option, old_val):
+    outdated_str = '''{
+        "temperature_sensor ViViD_Dryer_L": {
+            "i2c_software_scl_pin": "vivid:PA7",
+            "i2c_software_sda_pin": "vivid:PA6"
+        },
+        "temperature_sensor ViViD_Dryer_R": {
+            "i2c_software_scl_pin": "vivid:PA9",
+            "i2c_software_sda_pin": "vivid:PA10"
+        },
+        "heater_generic ViViD_Dryer": {
+            "combination_method": "mean",
+            "maximum_deviation": "20"
+        },
+        "gcode_macro MMS_DISABLE": {
+            "gcode": "\
+\\nMMS_STOP\
+\\nMANUAL_STEPPER STEPPER=selector_stepper ENABLE=0\
+\\nMANUAL_STEPPER STEPPER=drive_stepper ENABLE=0\
+\\nSET_HEATER_TEMPERATURE HEATER=ViViD_Dryer TARGET=0\
+\\nRESPOND TYPE=echo MSG='MMS DISABLE finish'"
+        }
+    }'''
+    try:
+        outdated_json = json.loads(outdated_str)
+        outdated_val = outdated_json.get(section, {}).get(option, None)
+        if outdated_val is not None:
+            outdated_val = str(outdated_val)
+            if (outdated_val == old_val):
+                return True
+    except json.JSONDecodeError as e:
+        print("Error Outdated Json: ", str(e))
+    return False
+
 if __name__ == "__main__":
     args_count = len(sys.argv) - 1
     if args_count != 3:
@@ -395,12 +429,12 @@ if __name__ == "__main__":
 
     new_filename = str(sys.argv[1])
     old_filename = str(sys.argv[2])
-    config_json = str(sys.argv[3])
+    config_str = str(sys.argv[3])
 
     try:
-        json = json.loads(config_json)
+        config_json = json.loads(config_str)
     except json.JSONDecodeError as e:
-        print("Error Json: ", str(e))
+        print("Error Config Json: ", str(e))
         sys.exit(1)
 
     new_mms = MMSConfigReader(new_filename)
@@ -418,7 +452,7 @@ if __name__ == "__main__":
                 print(f"Error[new]: {e}")
                 sys.exit(1)
 
-            old_val = json.get(section, {}).get(option, None)
+            old_val = config_json.get(section, {}).get(option, None)
             if old_val is None:
                 if old_mms is None:
                     continue
@@ -432,6 +466,8 @@ if __name__ == "__main__":
                 old_val = str(old_val)
 
             if new_val != old_val:
+                if (is_outdated_val(section, option, old_val)):
+                    continue
                 filename = new_mms.get_filename(section, option)
                 pos = get_option_position(filename, section, option)
                 config_replace_option_val(filename, pos, old_val)
