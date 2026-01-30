@@ -36,6 +36,23 @@ SHELL_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )"/ && pwd )"
 g_serial_id=""
 g_fw_path=""
 g_tool_path="${HOME}/katapult/scripts/flashtool.py"
+g_log_en=1
+
+log_enable() {
+    g_log_en=1
+}
+
+log_disable() {
+    g_log_en=0
+}
+
+log_echo() {
+    if [ "${g_log_en}" -eq 0 ]; then
+        return
+    fi
+    log_text=${1}
+    echo -e "${log_text}${INPUT}"
+}
 
 prompt_123() {
     prompt=$1
@@ -78,6 +95,24 @@ prompt_option() {
     declare -g $var_name="${!REPLY}"
 }
 
+prompt_yn() {
+    while true; do
+        read -n1 -p "$@ (y/n)? " yn
+        case "${yn}" in
+            Y|y)
+                echo -n "y"
+                break
+                ;;
+            N|n)
+                echo -n "n"
+                break
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
 abort(){
     if [ ! $# -eq 0 ]; then
         echo -e "${ERROR}$1${INPUT}"
@@ -90,12 +125,12 @@ flash_vivid_mcu() {
     mapfile -t OPTIONS < <(ls /dev/serial/by-id/ | grep "vivid\|buffer" 2>/dev/null)
     local opt_num=${#OPTIONS[@]}
     if [ "${opt_num}" == 0 ]; then
-        echo -e "${WARNING}${SECTION}Device serial id not found, please confirm if the ViViD cable is properly plugged in.${INPUT}"
+        log_echo "${WARNING}${SECTION}Device serial id not found, please confirm if the ViViD cable is properly plugged in."
         abort
     else
         opt_num=${#OPTIONS[@]}
 
-        echo -e "${PROMPT}${SECTION}Please select one of the IDs from the list below as the ID to ${PURPLE}flash${PROMPT}.${INPUT}"
+        log_echo "${PROMPT}${SECTION}Please select one of the IDs from the list below as the ID to ${PURPLE}flash${PROMPT}."
         prompt_option opt "ViViD flash serial id:" "${OPTIONS[@]}"
         if [ "${opt}" != "${NONE}" ]; then
             option_del "${opt}"
@@ -112,9 +147,9 @@ flash_vivid_mcu() {
                 g_fw_path="${SHELL_DIR}/firmware/klipper_${mcu}_8kb_usb.bin"
             fi
 
-            echo -e "${PROMPT}${SECTION}ViViD flash serial id: ${PURPLE}${g_serial_id}${INPUT}"
-            echo -e "${PROMPT}flashtool: ${PURPLE}${g_tool_path}${INPUT}"
-            echo -e "${PROMPT}firmware: ${PURPLE}${g_fw_path}${INPUT}"
+            log_echo "${PROMPT}${SECTION}ViViD flash serial id: ${PURPLE}${g_serial_id}"
+            log_echo "${PROMPT}flashtool: ${PURPLE}${g_tool_path}"
+            log_echo "${PROMPT}firmware: ${PURPLE}${g_fw_path}"
 
             python3 "${SHELL_DIR}/scripts/verify_firmware.py" ${mcu} ${g_fw_path}
             status=$?
@@ -126,6 +161,42 @@ flash_vivid_mcu() {
     fi
 }
 
+verify_katapult() {
+    if [ ! -e "${g_tool_path}" ]; then
+        log_echo "${PURPLE}${g_tool_path}${WARNING} not installed, Please install:
+${INFO}
+git clone https://github.com/Arksine/katapult ${HOME}/katapult
+"
+        yn=$(prompt_yn "Run and install")
+        echo
+        if [ "$yn" = "y" ]; then
+            git clone https://github.com/Arksine/katapult ${HOME}/katapult
+        else
+            abort "Please install ${PURPLE}katapult${ERROR}!"
+        fi
+    fi
+}
+
+verify_apt_package() {
+    package=$1
+    if ! dpkg -s "$package" >/dev/null 2>&1; then
+        log_echo "${PURPLE}${package}${WARNING} not installed, Please install:
+${INFO}
+sudo apt install $package
+"
+        yn=$(prompt_yn "Run and install")
+        echo
+        if [ "$yn" = "y" ]; then
+            sudo apt update
+            if ! sudo apt install "$package"; then
+                abort "${PURPLE}${package}${ERROR} installation failed!"
+            fi
+        else
+            abort "Please install ${PURPLE}${package}${ERROR}!"
+        fi
+    fi
+}
+
 while getopts ":f:" opt; do
   case $opt in
     f)
@@ -133,6 +204,10 @@ while getopts ":f:" opt; do
       ;;
   esac
 done
+
+verify_katapult
+
+verify_apt_package "python3-serial"
 
 flash_vivid_mcu
 
