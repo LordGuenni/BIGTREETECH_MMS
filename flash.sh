@@ -133,7 +133,6 @@ flash_vivid_mcu() {
         log_echo "${PROMPT}${SECTION}Please select one of the IDs from the list below as the ID to ${PURPLE}flash${PROMPT}."
         prompt_option opt "ViViD flash serial id:" "${OPTIONS[@]}"
         if [ "${opt}" != "${NONE}" ]; then
-            option_del "${opt}"
             g_serial_id=${opt}
 
             if [[ "$g_serial_id" == *"stm32g0b1xx"* ]]; then
