@@ -610,6 +610,16 @@ uninstall_KlipperScreen() {
     fi
 }
 
+sync_config_opt_enable() {
+    config_opt=$1
+    python3 "${SHELL_DIR}/scripts/config_opt_enable.py" "${g_mms_path}" "${g_old_config_path}" "${config_opt}"
+}
+
+sync_config_val_copy() {
+    config_val=$1
+    python3 "${SHELL_DIR}/scripts/config_val_copy.py" "${g_mms_path}" "${g_old_config_path}" "${config_val}"
+}
+
 set_user_config() {
     local base_dir="${g_mms_dir}/base"
     local cut_path="${base_dir}/mms-cut.cfg"
@@ -624,8 +634,8 @@ set_user_config() {
     log_echo "${PURPLE}Cutter${INFO} must be configured, please configure the specific position in ${PURPLE}${cut_path}"
 
     # entry sensor
+    export entry_sensor=${g_entry_sensor}
     if [ "${g_entry_sensor}" -eq 1 ]; then
-        sed -i -e "s|^#\s*\(entry_sensor:    EBBCan:gpio21\)|\1|" "${g_mms_path}"
         log_echo "${PURPLE}Entry Sensor${INFO} has been enabled, please configure the specific pin in ${PURPLE}${g_mms_path}"
     fi
 
@@ -651,7 +661,19 @@ set_user_config() {
         export buffer_id="/dev/serial/by-id/${g_buffer_id}"
     fi
 
-    json_str=`python3 -c '
+    config_opt=`python3 -c '
+import json
+import os
+data = {
+    "mms": {
+        "entry_sensor": os.environ.get("entry_sensor", None),
+    }
+}
+print(json.dumps(data, ensure_ascii=False))
+'`
+    sync_config_opt_enable "${config_opt}"
+
+config_val=`python3 -c '
 import json
 import os
 data = {
@@ -670,8 +692,7 @@ data = {
 }
 print(json.dumps(data, ensure_ascii=False))
 '`
-
-    python3 "${SHELL_DIR}/scripts/copy_config.py" "${g_mms_path}" "${g_old_config_path}" "${json_str}"
+    sync_config_val_copy "${config_val}"
 }
 
 prompt_service_restart() {
@@ -749,7 +770,8 @@ update_vivid() {
     install_klippy
     log_echo "${TITLE}${SECTION}"
     copy_config_files
-    python3 "${SHELL_DIR}/scripts/copy_config.py" "${g_mms_path}" "${g_old_config_path}" "{}"
+    sync_config_opt_enable "{}"
+    sync_config_val_copy "{}"
     prompt_service_restart klipper updated
 
     # reinstall KlipperScreen
