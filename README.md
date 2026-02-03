@@ -20,7 +20,7 @@
     Running supports the following parameters: 
 
     ```
-    [-h] [-i] [-d] [-z] [-g]
+    [-h] [-i] [-d] [-u] [-z] [-g]
     ```
 
     * `-h`: help
@@ -28,6 +28,8 @@
     * `-i`: install
 
     * `-d`: uninstall
+
+    * `-u`: update klipper and KlipperScreen. all parameters in the configuration files will be automatically copied from the old configuration without user interaction.
 
     * `-z`: skip github update check. The script will automatically check the version on GitHub by default and ensure that it runs with the latest version. If you have modified some logic of script locally, please disable updates at runtime through the `-z` parameter. For example:
 
