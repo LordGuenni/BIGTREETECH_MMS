@@ -53,6 +53,8 @@ ks_dst_dir="${HOME}/${VIVID_DIR}"
 screen="$ks_dir/screen.py"
 gcodes="$ks_dir/panels/gcodes.py"
 
+g_mms_dir="${KLIPPER_CONFIG_HOME}/bigtreetech-mms"
+g_mms_path="${g_mms_dir}/mms/mms.cfg"
 g_old_config_path=""
 g_vivid_id=""
 g_buffer_id=""
@@ -349,10 +351,10 @@ set_klipper_screen() {
     log_echo "${PROMPT}Installing ${PURPLE}KlipperScreen for ViViD${PROMPT} will add a ViViD management menu to KlipperScreen."
     yn=$(prompt_yn "Install KlipperScreen?")
     echo
-    if [ "$yn" = "n" ]; then
-        g_klippe_screen=0
-    else
+    if [ "$yn" = "y" ]; then
         g_klippe_screen=1
+    else
+        g_klippe_screen=0
     fi
 }
 
@@ -609,15 +611,13 @@ uninstall_KlipperScreen() {
 }
 
 set_user_config() {
-    local mms_dir="${KLIPPER_CONFIG_HOME}/bigtreetech-mms"
-    local mms_path="${mms_dir}/mms/mms.cfg"
-    local base_dir="${mms_dir}/base"
+    local base_dir="${g_mms_dir}/base"
     local cut_path="${base_dir}/mms-cut.cfg"
     local purge_brush_path="${base_dir}/mms-purge.cfg"
 
     # aht30 config [ATH10/AHT3X]
     if [ "${g_aht30_patch}" == 1 ]; then
-        local aht30_cfg="${mms_dir}/hardware/mms-heater.cfg"
+        local aht30_cfg="${g_mms_dir}/hardware/mms-heater.cfg"
         sed -i 's/sensor_type:          AHT3X/sensor_type:          AHT10/g' "${aht30_cfg}"
     fi
 
@@ -625,8 +625,8 @@ set_user_config() {
 
     # entry sensor
     if [ "${g_entry_sensor}" -eq 1 ]; then
-        sed -i -e "s|^#\s*\(entry_sensor:    EBBCan:gpio21\)|\1|" "${mms_path}"
-        log_echo "${PURPLE}Entry Sensor${INFO} has been enabled, please configure the specific pin in ${PURPLE}${mms_path}"
+        sed -i -e "s|^#\s*\(entry_sensor:    EBBCan:gpio21\)|\1|" "${g_mms_path}"
+        log_echo "${PURPLE}Entry Sensor${INFO} has been enabled, please configure the specific pin in ${PURPLE}${g_mms_path}"
     fi
 
     # purge_brush
@@ -638,14 +638,14 @@ set_user_config() {
 
     # vivid seral id
     if [ -z "${g_vivid_id}" ]; then
-        log_echo "${WARNING}ViViD MCU serial id has not been set. Please modify it manually in ${PURPLE}${mms_path}"
+        log_echo "${WARNING}ViViD MCU serial id has not been set. Please modify it manually in ${PURPLE}${g_mms_path}"
     else
         log_echo "${INFO}ViViD Serial ID: ${PURPLE}${g_vivid_id}"
         export vivid_id="/dev/serial/by-id/${g_vivid_id}"
     fi
     # buffer seral id
     if [ -z "${g_buffer_id}" ]; then
-        log_echo "${WARNING}Buffer MCU serial id has not been set. Please modify it manually in ${PURPLE}${mms_path}"
+        log_echo "${WARNING}Buffer MCU serial id has not been set. Please modify it manually in ${PURPLE}${g_mms_path}"
     else
         log_echo "${INFO}Buffer Serial ID: ${PURPLE}${g_buffer_id}"
         export buffer_id="/dev/serial/by-id/${g_buffer_id}"
@@ -671,7 +671,7 @@ data = {
 print(json.dumps(data, ensure_ascii=False))
 '`
 
-    python3 "${SHELL_DIR}/scripts/copy_config.py" "${mms_path}" "${g_old_config_path}" "${json_str}"
+    python3 "${SHELL_DIR}/scripts/copy_config.py" "${g_mms_path}" "${g_old_config_path}" "${json_str}"
 }
 
 prompt_service_restart() {
@@ -688,18 +688,14 @@ prompt_service_restart() {
     fi
 }
 
-cleanup_before_install() {
+install_vivid() {
+    # uninstall for cleanup
     log_disable
     cleaup_old_resource
     uninstall_klippy
     include_exclude_config_files 0
     uninstall_KlipperScreen
     log_enable
-}
-
-install_vivid() {
-    # uninstall for cleanup
-    cleanup_before_install
 
     set_serial_id
     set_cutter
@@ -714,7 +710,7 @@ install_vivid() {
     set_user_config
     # include in printer.cfg
     include_exclude_config_files 1
-    prompt_service_restart Klipper installed
+    prompt_service_restart klipper installed
 
     set_klipper_screen
     if [ "${g_klippe_screen}" -eq 1 ]; then
@@ -734,6 +730,38 @@ install_vivid() {
 
     log_echo "${TITLE}${SECTION}"
     log_echo "${GREEN}ViViD installation is complete."
+}
+
+update_vivid() {
+    if [ -d "${ks_dst_dir}" ]; then
+        g_klippe_screen=1
+    else
+        g_klippe_screen=0
+    fi
+    # uninstall for cleanup
+    log_disable
+    cleaup_old_resource
+    uninstall_klippy
+    uninstall_KlipperScreen
+    log_enable
+
+    # reinstall klipper
+    install_klippy
+    log_echo "${TITLE}${SECTION}"
+    copy_config_files
+    python3 "${SHELL_DIR}/scripts/copy_config.py" "${g_mms_path}" "${g_old_config_path}" "{}"
+    prompt_service_restart klipper updated
+
+    # reinstall KlipperScreen
+    if [ "${g_klippe_screen}" -eq 1 ]; then
+        install_KlipperScreen
+        prompt_service_restart KlipperScreen updated
+    fi
+
+    get_version
+
+    log_echo "${TITLE}${SECTION}"
+    log_echo "${GREEN}ViViD update is complete."
 }
 
 uninstall_vivid() {
@@ -764,10 +792,11 @@ usage() {
 }
 
 # step 1
-while getopts "idzgh" arg; do
+while getopts "iduzgh" arg; do
     case $arg in
         i) INSTALL=1;;
         d) UNINSTALL=1;;
+        u) UPDATE=1;;
         z) SKIP_UPDATE=1;;
         g) GET_VERSION=1;;
         h) usage;;
@@ -798,6 +827,8 @@ if [ "${INSTALL}" == 1 ]; then
     install_vivid
 elif [ "${UNINSTALL}" == 1 ]; then
     uninstall_vivid
+elif [ "${UPDATE}" == 1 ]; then
+    update_vivid
 else
     install_vivid # default install
 fi
