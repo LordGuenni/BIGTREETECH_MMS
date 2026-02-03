@@ -332,8 +332,8 @@ set_entry_sensor() {
 set_purge_brush() {
     log_echo "${TITLE}${SECTION}"
     log_echo "${PROMPT}If ${PURPLE}purge${PROMPT} is enabled, the old filament can be quickly purged out."
-    log_echo "If ${PURPLE}brush${PROMPT} is enabled, it will clean up scrap stuck to the nozzle with a brush before start/resume printing."
-    log_echo "Do you want to enable ${PURPLE}purge${PROMPT} and ${PURPLE}brush"
+    log_echo "${PROMPT}If ${PURPLE}brush${PROMPT} is enabled, it will clean up scrap stuck to the nozzle with a brush before start/resume printing."
+    log_echo "${PROMPT}Do you want to enable ${PURPLE}purge${PROMPT} and ${PURPLE}brush"
     yn=$(prompt_yn "Enable")
     echo
     if [ "$yn" = "n" ]; then
@@ -674,6 +674,20 @@ print(json.dumps(data, ensure_ascii=False))
     python3 "${SHELL_DIR}/scripts/copy_config.py" "${mms_path}" "${g_old_config_path}" "${json_str}"
 }
 
+prompt_service_restart() {
+    service=$1
+    action=$2
+    log_echo "${PURPLE}${service}${INFO} has been ${PURPLE}${action}${INFO}. Restart immediately? (This will interrupt printing if there are any ongoing tasks.)"
+    yn=$(prompt_yn "Restart")
+    echo
+    if [ "$yn" = "y" ]; then
+        sudo systemctl restart ${service}.service
+        log_echo "${INFO}The ${PURPLE}${service}${INFO} service has been restarted."
+    else
+        log_echo "${WARNING}The ${PURPLE}${service}${WARNING} service needs to be restarted for it to take effect. Please manually restart it later."
+    fi
+}
+
 cleanup_before_install() {
     log_disable
     cleaup_old_resource
@@ -700,28 +714,12 @@ install_vivid() {
     set_user_config
     # include in printer.cfg
     include_exclude_config_files 1
-
-    yn=$(prompt_yn "Klipper has been installed. Restart immediately? (This will interrupt printing if there are any ongoing tasks.)")
-    echo
-    if [ "$yn" = "y" ]; then
-        sudo systemctl restart klipper
-        log_echo "${INFO}The Klipper service has been restarted."
-    else
-        log_echo "${WARNING}The Klipper service needs to be restarted for it to take effect. Please manually restart it later."
-    fi
+    prompt_service_restart Klipper installed
 
     set_klipper_screen
     if [ "${g_klippe_screen}" -eq 1 ]; then
         install_KlipperScreen
-
-        yn=$(prompt_yn "KlipperScreen has been installed. Restart immediately? (This may interrupt printing if there are any ongoing tasks.)")
-        echo
-        if [ "$yn" = "y" ]; then
-            sudo systemctl restart KlipperScreen.service
-            log_echo "${INFO}The KlipperScreen service has been restarted."
-        else
-            log_echo "${WARNING}The KlipperScreen service needs to be restarted for it to take effect. Please manually restart it later."
-        fi
+        prompt_service_restart KlipperScreen installed
     fi
 
     log_echo "${TITLE}${SECTION}"
@@ -743,24 +741,10 @@ uninstall_vivid() {
 
     uninstall_klippy
     include_exclude_config_files 0
-    yn=$(prompt_yn "Klipper has been uninstalled. Restart immediately? (This will interrupt printing if there are any ongoing tasks.)")
-    echo
-    if [ "$yn" = "y" ]; then
-        sudo systemctl restart klipper
-        log_echo "${INFO}The Klipper service has been restarted."
-    else
-        log_echo "${WARNING}The Klipper service needs to be restarted for it to take effect. Please manually restart it later."
-    fi
+    prompt_service_restart klipper uninstalled
 
     uninstall_KlipperScreen
-    yn=$(prompt_yn "KlipperScreen has been installed. Restart immediately? (This may interrupt printing if there are any ongoing tasks.)")
-    echo
-        if [ "$yn" = "y" ]; then
-            sudo systemctl restart KlipperScreen.service
-            log_echo "${INFO}The KlipperScreen service has been restarted."
-        else
-            log_echo "${WARNING}The KlipperScreen service needs to be restarted for it to take effect. Please manually restart it later."
-        fi
+    prompt_service_restart KlipperScreen uninstalled
 
     log_echo "${GREEN}ViViD uninstallation is complete."
 }
