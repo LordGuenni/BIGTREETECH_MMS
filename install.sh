@@ -201,7 +201,7 @@ verify_version() {
     local oldest=$3
     local latest=$4
 
-    if [ -d "${dir}" ]; then
+    if [ -d "${dir}" ] && [ "${UPDATE}" != 1 ]; then
         local commit_id=$(git -C "${dir}" log -n 1 --pretty=%H)
         local err_oldest=""
         local err_lastest=""
