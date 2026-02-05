@@ -772,11 +772,13 @@ update_vivid() {
     copy_config_files
     sync_config_opt_enable "{}"
     sync_config_val_copy "{}"
-    prompt_service_restart klipper updated
-
     # reinstall KlipperScreen
     if [ "${g_klippe_screen}" -eq 1 ]; then
         install_KlipperScreen
+    fi
+
+    prompt_service_restart klipper updated
+    if [ "${g_klippe_screen}" -eq 1 ]; then
         prompt_service_restart KlipperScreen updated
     fi
 

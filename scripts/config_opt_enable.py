@@ -63,7 +63,9 @@ if __name__ == "__main__":
                     except NoOptionError as e:
                         filename = new_mms.get_filename(section, None)
                         pos = new_mms.get_option_val_position(filename, section, option, True)
-                        config_option_enable(filename, pos["option_line"], True)
+                        result = config_option_enable(filename, pos["option_line"], True)
+                        if result == False:
+                            print(f"section:{section}, option:{option}, uncomment[True] failed")
 
         for section, option_dict in config_json.items():
             for option, value in option_dict.items():
@@ -77,7 +79,9 @@ if __name__ == "__main__":
                 if value != new_true:
                     filename = new_mms.get_filename(section, None)
                     pos = new_mms.get_option_val_position(filename, section, option, True)
-                    config_option_enable(filename, pos["option_line"], value)
+                    result = config_option_enable(filename, pos["option_line"], value)
+                    if result == False:
+                        print(f"section:{section}, option:{option}, uncomment[{value}] failed")
 
     except Exception as e:
         print(f"Error[config_uncomment]: {e}") # print(f"{type(e).__name__})

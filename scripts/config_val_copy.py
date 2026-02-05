@@ -105,7 +105,7 @@ if __name__ == "__main__":
             for option in new_mms.fileconfig.options(section):
                 try:
                     new_val = new_mms.fileconfig.get(section, option)
-                except error as e:
+                except Exception as e:
                     print(f"Error[config_copy][new]: {e}")
                     sys.exit(1)
 
@@ -116,7 +116,7 @@ if __name__ == "__main__":
                     else:
                         try:
                             old_val = old_mms.fileconfig.get(section, option)
-                        except error as e:
+                        except Exception as e:
                             print(f"Info[config_copy][old]: {e}")
                             continue
                 else:
