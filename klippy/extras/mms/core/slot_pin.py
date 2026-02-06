@@ -191,6 +191,14 @@ class BaseSlotPin(ABC):
         # Register mcu_stepper to mcu_endstop, for moving:manual_home
         self.pin_obj.set_stepper(mms_stepper.get_mcu_stepper())
 
+    def _terminate_stepper_moving(self):
+        mms_drive = self.mms_slot.get_mms_drive()
+        if mms_drive and mms_drive.is_running():
+            mms_drive.terminate_moving()
+        mms_selector = self.mms_slot.get_mms_selector()
+        if mms_selector and mms_selector.is_running():
+            mms_selector.terminate_moving()
+
     def break_endstop_homing(self):
         if not self._waiting:
             return False
@@ -215,7 +223,7 @@ class BaseSlotPin(ABC):
         # self.log_info(f"trsync query return:{ret}")
 
         # Update mms_stepper status to terminated before pause
-        self.mms_slot.terminate_stepper_moving()
+        self._terminate_stepper_moving()
         # End up waiting
         self.stop_waiting()
 

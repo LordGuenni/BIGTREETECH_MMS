@@ -162,12 +162,12 @@ class MMSFilamentDetection:
     # ---- Control ----
     def enable(self):
         self._enable = True
-        self.log_info_s("MMS Filament Detection is enabled")
+        self.log_info_s("MMS filament detection is enabled")
 
     def disable(self):
         self._enable = False
         self.deactivate()
-        self.log_info_s("MMS Filament Detection is disabled")
+        self.log_info_s("MMS filament detection is disabled")
 
     def recover(self):
         if self._enable is not self._enable_config:
@@ -185,11 +185,14 @@ class MMSFilamentDetection:
             f"slot[{slot_num}] filament detection is activated")
 
     def deactivate(self):
-        slot_num = self._activating_slot_num
+        if not self._enable:
+            return
+        msg_num = self._activating_slot_num \
+            if self._activating_slot_num is not None else '*'
         self._activating = False
         self._activating_slot_num = None
         self.log_info_s(
-            f"slot[{slot_num}] filament detection is deactivated")
+            f"slot[{msg_num}] filament detection is deactivated")
 
     @contextmanager
     def monitor(self, slot_num):

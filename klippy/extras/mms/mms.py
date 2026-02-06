@@ -36,7 +36,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0399"
+    version: str = "0.1.0411"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -242,8 +242,6 @@ class MMS:
     def _register_event(self):
         printer_adapter.register_klippy_connect(
             self._handle_klippy_connect)
-        # printer_adapter.register_klippy_ready(
-        #     self._handle_klippy_ready)
         printer_adapter.register_klippy_shutdown(
             self._handle_klippy_shutdown)
         printer_adapter.register_klippy_disconnect(
@@ -255,12 +253,10 @@ class MMS:
         self._initialize_slots()
         self._initialize_gcode()
         self._initialize_loggers()
+        self._initialize_swap()
         self._initialize_observer()
         self.welcome()
         self._is_connected = True
-
-    def _handle_klippy_ready(self):
-        return
 
     def _handle_klippy_shutdown(self):
         if self.mms_logger:
@@ -361,6 +357,7 @@ class MMS:
             ("MMS_TEST", self.cmd_MMS_TEST),
         ]
         gcode_adapter.bulk_register(commands)
+        gcode_adapter.register_self_command()
 
     def _initialize_loggers(self):
         self.mms_logger = printer_adapter.get_mms_logger()
@@ -376,14 +373,17 @@ class MMS:
         self.log_error_s = self.mms_logger.create_log_error(
             console_output=False)
 
+    def _initialize_swap(self):
+        self.mms_charge = printer_adapter.get_mms_charge()
+        self.mms_eject = printer_adapter.get_mms_eject()
+        self.mms_swap = printer_adapter.get_mms_swap()
+
     def _initialize_observer(self):
         # Notice the sequence of callbacks registration
         self.print_observer = PrintObserver()
 
         # Buffer monitor
         for mms_buffer in self.mms_buffers:
-            # self.print_observer.register_start_callback(
-            #     mms_buffer.activate_monitor)
             self.print_observer.register_resume_callback(
                 mms_buffer.activate_monitor)
             self.print_observer.register_pause_callback(
@@ -392,27 +392,11 @@ class MMS:
                 mms_buffer.deactivate_monitor)
 
         # Register Eject for Print finish
-        self.mms_eject = printer_adapter.get_mms_eject()
         self.print_observer.register_finish_callback(
             self.mms_eject.mms_eject)
-
         # Register Charge teardown for Print finish
-        self.mms_charge = printer_adapter.get_mms_charge()
         self.print_observer.register_finish_callback(
             self.mms_charge.teardown)
-
-        # Register MMS Pause callback for Print Pause
-        self.print_observer.register_pause_callback(
-            self.mms_pause.handle_print_is_paused
-        )
-
-        # Register MMS Resume callback for Print Resume
-        self.print_observer.register_resume_callback(
-            self.mms_resume.handle_print_is_resumed
-        )
-
-        # Init mms_swap
-        self.mms_swap = printer_adapter.get_mms_swap()
 
     def welcome(self):
         self.log_info(self.mms_config.welcome)
@@ -511,6 +495,9 @@ class MMS:
             mcu_pin, self.pin_type.entry, self.pin_state.released)
 
     # -- Get config or componet --
+    def get_version(self):
+        return self.mms_config.version
+
     def get_retry_times(self):
         return self.p_mms_config.retry_times
 
@@ -586,7 +573,7 @@ class MMS:
             if slot.is_loading()
         ]
 
-    def get_current_slot(self):
+    def get_current_slot(self, no_log=False):
         """
         Current slot is determined by the following logic:
         - If selector has a focused slot (selected_slot), it takes priority
@@ -661,7 +648,8 @@ class MMS:
 
             msg = (prefix + (f"selecting:{selecting}/is_active:{is_active},"
                              f" loading:{loading}"))
-            self.log_info_s(msg)
+            if not no_log:
+                self.log_info_s(msg)
             # return selecting if selecting is not None and loading else None
             return selecting, is_active, loading
 
@@ -854,7 +842,6 @@ class MMS:
         return self.print_observer.is_paused()
 
     def printer_is_resuming(self):
-        # Swap is resuming, keep pausing
         return self.mms_resume.is_resuming()
 
     def cmd_can_exec(self):

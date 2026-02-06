@@ -224,7 +224,7 @@ class ExtruderAdapter(BaseAdapter):
         # Transform speed from mm/min to mm/s
         # 'extruder_speed' in [mm/min]
         # transform to [mm/s]
-        return extruder_speed / 60.
+        return abs(extruder_speed) / 60.
 
 
 # Global instance for singleton

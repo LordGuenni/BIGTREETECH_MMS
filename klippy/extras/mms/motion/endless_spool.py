@@ -22,21 +22,24 @@ class MMSEndlessSpoolConfig:
     truncate_distance: float = 2000
     truncate_orphan_distance: float = 200
     extrude_distance_max: float = 5000
+    hint_prompt: str = """
+        The filament in slot[{slot_num}] has runout.\n
+        Please clear any remaining filament.\n
+        After inserting a new filament,
+        click RESUME to resume printing.
+    """
+
+    def get_hint(self, slot_num):
+        return self.hint_prompt.format(slot_num=slot_num)
 
 
 class MMSEndlessSpool:
     def __init__(self):
-        self.slot_sub = {
-            0:1,
-            1:2,
-            2:3,
-            3:0,
-        }
-        es_config = MMSEndlessSpoolConfig()
-        self.log_flag = es_config.log_flag
-        self.truncate_distance = es_config.truncate_distance
-        self.truncate_orphan_distance = es_config.truncate_orphan_distance
-        self.extrude_distance_max = es_config.extrude_distance_max
+        self.es_config = MMSEndlessSpoolConfig()
+        self.log_flag = self.es_config.log_flag
+        self.truncate_distance = self.es_config.truncate_distance
+        self.truncate_orphan_distance = self.es_config.truncate_orphan_distance
+        self.extrude_distance_max = self.es_config.extrude_distance_max
 
         self.pin_type = PinType()
 
@@ -82,9 +85,6 @@ class MMSEndlessSpool:
 
     # ---- Register ----
     def _register(self):
-        if not self._enable:
-            return
-
         for mms_slot in self.mms.get_mms_slots():
             slot_num = mms_slot.get_num()
 
@@ -92,6 +92,7 @@ class MMSEndlessSpool:
                 callback=self._handle_inlet_is_released,
                 params={"slot_num":slot_num}
             )
+
             if self.mms.get_entry():
                 # Entry is set
                 mms_slot.entry.add_release_callback(
@@ -111,22 +112,19 @@ class MMSEndlessSpool:
         print_observer.register_resume_callback(self.activate)
 
     def _unregister(self):
-        # if not self._enable:
-        #     return
-
         for mms_slot in self.mms.get_mms_slots():
             slot_num = mms_slot.get_num()
+
+            mms_slot.inlet.remove_release_callback(
+                callback=self._handle_inlet_is_released)
+
             # Entry is set
             if self.mms.get_entry():
                 mms_slot.entry.remove_release_callback(
-                    callback=self._handle_entry_is_released,
-                    params={"slot_num":slot_num}
-                )
+                    callback=self._handle_entry_is_released)
             else:
                 mms_slot.gate.remove_release_callback(
-                    callback=self._handle_gate_is_released,
-                    params={"slot_num":slot_num}
-                )
+                    callback=self._handle_gate_is_released)
 
         print_observer = self.mms.get_print_observer()
         print_observer.unregister_pause_callback(self.deactivate)
@@ -134,76 +132,64 @@ class MMSEndlessSpool:
         print_observer.unregister_resume_callback(self.activate)
 
     # ---- Status ----
-    def is_enabled(self):
-        return self._enable
+    # def is_enabled(self):
+    #     return self._enable
 
     def is_activating(self):
         return self._activating
 
     def is_inlet_released(self, slot_num):
-        return self._enable \
-            and self._activating \
+        return self._activating \
             and self._inlet_slot_num is not None \
             and slot_num == self._inlet_slot_num
 
     # ---- Handlers ----
-    def _is_target(self, slot_num):
-        # Not activating or not printing, skip
-        if not self._enable \
-            or not self._activating \
-            or not self.mms.printer_is_printing():
-            return False
-
-        # Self is not charged slot, skip
+    def _can_handle(self, slot_num):
         slot_num_c = self.mms_charge.get_charged_slot()
-        if slot_num_c is None or slot_num != slot_num_c:
-            return False
 
-        return True
+        if self._activating \
+            and self.mms.printer_is_printing() \
+            and slot_num_c is not None \
+            and slot_num == slot_num_c:
+            return True
 
-    def _pause_and_wait(self, slot_num):
-        # MMS Buffer pause
-        mms_buffer = self.mms.get_mms_slot(slot_num).get_mms_buffer()
+        # Not activating/not printing/self is not charged slot
+        return False
+
+    def _pause(self, slot_num):
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        mms_buffer = mms_slot.get_mms_buffer()
         mms_buffer.deactivate_monitor()
 
         # Pause print
-        if self.mms_pause.mms_pause():
-            self.mms_resume.set_mms_swap_resume(
-                func=self.mms_swap.cmd_SWAP,
-                gcmd=gcode_adapter.easy_gcmd(
-                    command=self.mms_swap.format_command(slot_num)
-                )
+        if not self.mms_pause.mms_pause():
+            # Pause failed
+            raise EndlessSpoolFailedError(
+                f"slot[{slot_num}] endless spool pause failed",
+                mms_slot
             )
-        else:
-            self.log_warning_s(
-                f"slot[{slot_num}] endless spool mms pause failed"
+
+        # Setup resume after pause is success
+        self.mms_resume.set_mms_swap_resume(
+            func=self.mms_swap.cmd_SWAP,
+            gcmd=gcode_adapter.easy_gcmd(
+                command=self.mms_swap.format_command(slot_num)
             )
-            return False
+        )
+
+    def _pause_and_hint(self, slot_num):
+        self._pause(slot_num)
+        self.log_info(self.es_config.get_hint(slot_num))
+
+    def _pause_and_wait(self, slot_num):
+        self._pause(slot_num)
 
         # Wait Toolhead idle
         if not self.mms_delivery.wait_toolhead():
-            self.log_warning_s(
-                f"slot[{slot_num}] wait toolhead idle timeout"
-            )
-            return False
-
-        return True
-
-    def _prepare_handle(self, slot_num, pin_type):
-        if not self._is_target(slot_num):
-            return False
-
-        msg = f"slot[{slot_num}] endless spool '{pin_type}' released"
-        self.log_info(f"{msg} {self.log_flag}")
-
-        if not self._pause_and_wait(slot_num):
             raise EndlessSpoolFailedError(
-                f"{msg} {self.log_flag}",
+                f"slot[{slot_num}] endless spool wait toolhead idle timeout",
                 self.mms.get_mms_slot(slot_num)
             )
-            return False
-
-        return True
 
     def _purge_long_distance(self, distance):
         speed = self.mms_purge.get_purge_speed()
@@ -225,11 +211,12 @@ class MMSEndlessSpool:
 
     def _find_slot_new(self, slot_num):
         slot_num_new = None
-        slot_num_org = slot_num
         slot_num_checked = [slot_num]
+        mms_slot = self.mms.get_mms_slot(slot_num)
 
         while not slot_num_new:
-            slot_num_sub = self.slot_sub.get(slot_num, None)
+            slot_num_sub = mms_slot.get_endless_with_slot()
+            # No sub, sub is slot itself, sub has been checked
             if slot_num_sub is None or slot_num_sub in slot_num_checked:
                 break
 
@@ -254,40 +241,38 @@ class MMSEndlessSpool:
         self.mms_swap.update_mapping_slot_num(slot_num, slot_num_new)
         self.mms_resume.gcode_resume()
 
-    def _handle_inlet_is_released(self, slot_num):
-        p_type = self.pin_type.inlet
-        if not self._is_target(slot_num):
-            return
-
-        msg = f"slot[{slot_num}] endless spool '{p_type}' released"
+    # ---- Handlers ----
+    def _log_msg(self, slot_num, p_type):
+        msg = f"slot[{slot_num}] '{p_type}' released, endless spool handling"
         self.log_info(f"{msg} {self.log_flag}")
 
+    def _handle_inlet_is_released(self, slot_num):
+        if not self._can_handle(slot_num):
+            return
+        self._log_msg(slot_num, self.pin_type.inlet)
         self._inlet_slot_num = slot_num
 
-        # mms_slot = self.mms.get_mms_slot(slot_num)
-        # mms_buffer = mms_slot.get_mms_buffer()
-        # mms_buffer.deactivate_monitor()
-
-        # # Make sure is not selecting
-        # self.mms_delivery.deliver_async_task(
-        #     self.mms_delivery.unselect,
-        # )
-
     def _handle_gate_is_released(self, slot_num):
+        if not self._can_handle(slot_num):
+            return
+
+        if not self._enable:
+            self._pause_and_hint(slot_num)
+            return
+
         p_type = self.pin_type.gate
+        self._log_msg(slot_num, p_type)
 
         try:
-            if not self._prepare_handle(slot_num, p_type):
-                return
+            self._pause_and_wait(slot_num)
 
             # If Gate is released but
             # Inlet is still triggered, just resume
             mms_slot = self.mms.get_mms_slot(slot_num)
             if mms_slot.inlet.is_triggered():
                 self.log_info(
-                    f"slot[{slot_num}] "
-                    f"'{self.pin_type.inlet}' is triggered, "
-                    "resume immediately"
+                    f"slot[{slot_num}] '{self.pin_type.inlet}' "
+                    "is triggered, resume immediately"
                 )
                 self.mms_resume.gcode_resume()
                 return
@@ -308,33 +293,38 @@ class MMSEndlessSpool:
             self.log_error_s(e)
         except Exception as e:
             self.log_error_s(
-                f"slot[{slot_num}] endless spool "
-                f"'{p_type}' released error: {e}"
+                f"slot[{slot_num}] '{p_type}' released, "
+                f"endless spool handle error: {e}"
             )
 
     def _handle_entry_is_released(self, slot_num):
+        if not self._can_handle(slot_num):
+            return
+
+        if not self._enable:
+            self._pause_and_hint(slot_num)
+            return
+
         p_type = self.pin_type.entry
+        self._log_msg(slot_num, p_type)
 
         try:
-            if not self._prepare_handle(slot_num, p_type):
-                return
+            self._pause_and_wait(slot_num)
 
             # If Entry is released but
             # Inlet/Gate is still triggered, just resume
             mms_slot = self.mms.get_mms_slot(slot_num)
             if mms_slot.inlet.is_triggered():
                 self.log_info(
-                    f"slot[{slot_num}] "
-                    f"'{self.pin_type.inlet}' is triggered, "
-                    "resume immediately"
+                    f"slot[{slot_num}] '{self.pin_type.inlet}' "
+                    "is triggered, resume immediately"
                 )
                 self.mms_resume.gcode_resume()
                 return
             if mms_slot.gate.is_triggered():
                 self.log_info(
-                    f"slot[{slot_num}] "
-                    f"'{self.pin_type.gate}' is triggered, "
-                    "resume immediately"
+                    f"slot[{slot_num}] '{self.pin_type.gate}' "
+                    "is triggered, resume immediately"
                 )
                 self.mms_resume.gcode_resume()
                 return
@@ -346,30 +336,23 @@ class MMSEndlessSpool:
             self.log_error_s(e)
         except Exception as e:
             self.log_error_s(
-                f"slot[{slot_num}] endless spool "
-                f"'{p_type}' released error: {e}"
+                f"slot[{slot_num}] '{p_type}' released, "
+                f"endless spool handle error: {e}"
             )
 
     # ---- Control ----
     def activate(self):
-        if not self._enable:
-            return
         self._activating = True
         self.log_info_s("MMS endless spool is activated")
         self.mms_fil_detection.disable()
 
     def deactivate(self):
-        if not self._enable:
-            return
         self._activating = False
         self.log_info_s("MMS endless spool is deactivated")
         self.mms_fil_detection.recover()
         self._inlet_slot_num = None
 
     def purge_truncate(self, slot_num):
-        if not self._enable:
-            return
-
         # Self is not charged slot, skip
         slot_num_c = self.mms_charge.get_charged_slot()
         if slot_num_c is None or slot_num != slot_num_c:
@@ -392,12 +375,18 @@ class MMSEndlessSpool:
             self.log_warning(e)
             return
 
+        self.log_info_s(
+            f"slot[{slot_num}] endless spool purge truncate begin")
+
         if mms_slot.entry.is_set():
             self._purge_until_entry_release(slot_num)
             self._purge_long_distance(self.truncate_orphan_distance)
             return
         else:
             self._purge_long_distance(self.truncate_distance)
+
+        self.log_info_s(
+            f"slot[{slot_num}] endless spool purge truncate finish")
 
     def _purge_until_entry_release(self, slot_num):
         mms_slot = self.mms.get_mms_slot(slot_num)

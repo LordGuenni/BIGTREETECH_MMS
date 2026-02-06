@@ -1,5 +1,67 @@
 # MMS Change Log
 
+## Ver 0.1.411
+
+- Fixed bugs related to Delivery wait stepper idle
+
+## Ver 0.1.410
+
+- Made Selector refine calibration distance configurable
+- Updated logic when Endless Spool is disabled
+
+## Ver 0.1.409
+
+- Developed the running/wait_idle/terminate mechanism of MMS Stepper
+- Abstracted the logic related to SLOT/SLOT_Pin Homing terminal into the respective functional scope of each module
+
+## Ver 0.1.408
+
+- Minor refactoring of MMS Buffer feed/retract
+- Continued to add strict validation steps for the three key motion parameters (distance/speed/accel) during motion scheduling
+- Fixed the mathematical calculation error caused by illegal motion parameters leading to the incorrect null assignment of ManualMove.end_print_time
+
+## Ver 0.1.407
+
+- Fixed the distance loss issue of MMS Stepper ManualMove motion mode during small-distance movement scheduling
+
+## Ver 0.1.406
+
+- Added validation for motion parameters such as speed/accel in Delivery/Stepper to prevent the input of illegal negative values, excessively large values and excessively small values
+- Corrected typos in logs
+
+## Ver 0.1.405
+
+- Delivery update relevant parameters for Stepper:Selector fixed-distance movement
+- Delivery added MMS_TEST_SELECTOR for testing the movement consistency of Selector
+- Delivery added MMS_TEST_SELECTOR_MEASURE for measuring the available trigger range of Pin:Selector
+- Stepper added distance monitoring log output after motion completion
+
+## Ver 0.1.404
+
+- Configuration changes for bigtreetech-mms/hardware/mms-stepper.cfg
+- Modified scheduling logic related to Delivery Stepper:Selector
+- The core scheduling parameter `interval_time` of Stepper is configured with a differential strategy
+
+## Ver 0.1.403
+
+- The "Communication timeout during homing" exception of Stepper no longer triggers Shutdown, and instead reports to the business layer
+- Modified the exception handling logic for Careful Load failure in Charge to adapt to the changes of Stepper
+- Fixed the fixed-distance calibration issue in the final phase after successful SLOT selection in Delivery
+
+## Ver 0.1.402
+
+- Enhanced state management for MMS Pause/Resume
+- Fixed the issue where the pause was skipped after Charge failed again in a new print job when the user manually stopped printing after a Charge failure pause
+
+## Ver 0.1.401
+
+- Enhanced MMS Buffer to extend log output in VVD/Buffer bussiness
+- Fixed the feeding abnormality caused by the Monitor incorrectly monitoring the SLOT after pause and resume in the multi-Buffer scenario following Extend
+
+## Ver 0.1.400
+
+- Added the MMS_MAN command to automatically record and output raw commands created by MMS
+
 ## Ver 0.1.0399
 
 - MMS Brush fixed issue where unnecessary movement to PeckPoint still occurred when Peck was not enabled

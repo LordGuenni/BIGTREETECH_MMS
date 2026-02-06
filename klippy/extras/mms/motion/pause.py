@@ -31,8 +31,15 @@ class MMSPause:
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
         self.mms_delivery = printer_adapter.get_mms_delivery()
-        self.print_observer = self.mms.get_print_observer()
         self.mms_resume = self.mms.get_mms_resume()
+
+        self.print_observer = self.mms.get_print_observer()
+        self.print_observer.register_start_callback(
+            self._handle_print_is_started)
+        self.print_observer.register_pause_callback(
+            self._handle_print_is_paused)
+        self.print_observer.register_finish_callback(
+            self._handle_print_is_finished)
 
     def _initialize_gcode(self):
         commands = [
@@ -47,10 +54,14 @@ class MMSPause:
         # self.log_error = mms_logger.create_log_error()
 
     # ---- Handlers ----
-    def handle_print_is_paused(self):
-        # if self._is_mms_paused:
-        #     return
+    def _handle_print_is_started(self):
+        self.free_mms_paused()
+
+    def _handle_print_is_paused(self):
         self.mms_resume.capture_selected_slots()
+
+    def _handle_print_is_finished(self):
+        self.free_mms_paused()
 
     # ---- Gcode control ----
     def gcode_pause(self):
@@ -69,19 +80,6 @@ class MMSPause:
     def free_mms_paused(self):
         self._is_mms_paused = False
 
-    # def _disable_mms_steppers(self):
-    #     slot_num = self.mms.get_current_slot()
-
-    #     for mms_drive in self.mms.get_mms_drives():
-    #         if mms_drive.is_running():
-    #             self.mms_delivery.wait_mms_drive(slot_num)
-    #         mms_drive.disable()
-
-    #     for mms_selector in self.mms.get_mms_selectors():
-    #         if mms_selector.is_running():
-    #             self.mms_delivery.wait_mms_selector(slot_num)
-    #         mms_selector.disable()
-
     def mms_pause(self):
         if print_stats_adapter.is_paused_or_finished() \
             and not self.mms_resume.is_resuming():
@@ -96,10 +94,11 @@ class MMSPause:
         #     return False
 
         if self.is_mms_paused():
+            self.log_info(
+                "mms_pause skip: has already paused by mms")
             return False
 
         self.log_info("mms_pause begin")
-
         # Mark is paused by MMS
         self.set_mms_paused()
 
@@ -109,15 +108,11 @@ class MMSPause:
 
         # Save target temp of extruder for resume
         toolhead_adapter.save_target_temp()
-
         # Always enable absolute coordinates(G90) before pause
         gcode_move_adapter.enable_absolute_coordinates()
 
         # Pause with gcode command
         self.gcode_pause()
-
-        # Disable MMS Steppers
-        # self._disable_mms_steppers()
 
         self.log_info("mms_pause finish")
         return True

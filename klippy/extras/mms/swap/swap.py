@@ -109,15 +109,17 @@ class MMSSwap:
         self.mms_purge = printer_adapter.get_mms_purge()
 
         # Get objects from MMS
+        self.mms_pause = self.mms.get_mms_pause()
+        self.mms_resume = self.mms.get_mms_resume()
+        self.mms_endless_spool = self.mms.get_mms_endless_spool()
+
         print_observer = self.mms.get_print_observer()
         print_observer.register_start_callback(
             self._init_mapping_filename
         )
-        print_observer.register_finish_callback(self._reset_mapping)
-
-        self.mms_pause = self.mms.get_mms_pause()
-        self.mms_resume = self.mms.get_mms_resume()
-        self.mms_endless_spool = self.mms.get_mms_endless_spool()
+        print_observer.register_finish_callback(
+            self._reset_mapping
+        )
 
     def _initialize_gcode(self):
         # Dynamic register swap action command
@@ -168,6 +170,9 @@ class MMSSwap:
                 f"filename to '{filename}'"
             )
             self.mapping["filename"] = filename
+
+    def get_command_string(self):
+        return self.command_string
 
     # ---- Status ----
     def is_enabled(self):
@@ -549,6 +554,3 @@ class MMSSwap:
 
 def load_config(config):
     return MMSSwap(config)
-
-# class SWAPMapping:
-#     return

@@ -31,13 +31,13 @@
 #                                                                | MMS LED |
 #                                                                +---------+
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 from dataclasses import dataclass, field
 
-from .config import OptionalField, PrinterConfig
+from .config import PrinterConfig
 from .slot_led import SlotLED
 from .slot_pin import (
     PinType,
@@ -56,20 +56,25 @@ from ..adapters import printer_adapter
 @dataclass(frozen=True)
 class PrinterSlotConfig(PrinterConfig):
     """ Configuration values in mms-slot.cfg """
+    # Pins
     selector: str = ""
     inlet: str = ""
     gate: str = ""
-
+    # LED
     led_name: str = ""
     chip_index: list = field(default_factory=list)
     brightness: float = 0.5
-
+    # Autoload
     autoload_enable: int = 1
-
+    # RFID
     rfid_name: str = ""
     rfid_enable: int = 0
     rfid_detect_duration: float = 50  # seconds
     rfid_read_duration: float = 4  # seconds
+    # Endless spool
+    endless_with_slot: int = 0    # slot number
+    # Selector refine calibration
+    selector_calibrate_distance: float = 2.0  # mm
 
 
 class MMSSlot:
@@ -231,6 +236,12 @@ class MMSSlot:
     def is_extended(self):
         return self._is_extended
 
+    def get_endless_with_slot(self):
+        return self.slot_config.endless_with_slot
+
+    def get_selector_calibrate_distance(self):
+        return abs(self.slot_config.selector_calibrate_distance)
+
     # ---- MMS support ----
     def get_mms_slot_pin(self, pin_type):
         return self.slot_pin_map.get(pin_type, None)
@@ -304,17 +315,17 @@ class MMSSlot:
 
     def stop_homing(self, slot_pin=None):
         slot_pin = slot_pin or self.get_waiting_pin()
-        if slot_pin:
-            success = slot_pin.break_endstop_homing()
-            if success:
-                self.log_info_s(
-                    f"slot[{self.num}] "
-                    f"'{slot_pin.get_mms_name()}' homing stop"
-                )
-                return
+        if slot_pin is None:
+            # Not pin is waiting
+            self.log_warning(f"slot[{self.num}] is not homing")
+            return
 
-        # Not pin is waiting
-        self.log_warning(f"slot[{self.num}] no homing is waiting")
+        # Stop homing
+        if slot_pin.break_endstop_homing():
+            self.log_info_s(
+                f"slot[{self.num}] '{slot_pin.get_mms_name()}' "
+                "homing is stopped"
+            )
 
     # ---- MMS Stepper support ----
     def complete_selector_moving(self):
@@ -324,13 +335,6 @@ class MMSSlot:
     def complete_drive_moving(self):
         if self.mms_drive and self.mms_drive.is_running():
             self.mms_drive.complete_manual_home()
-
-    def terminate_stepper_moving(self):
-        if self.mms_selector and self.mms_selector.is_running():
-            self.mms_selector.terminate_manual_home()
-
-        if self.mms_drive and self.mms_drive.is_running():
-            self.mms_drive.terminate_manual_home()
 
     # ---- MMS Exceptions support ----
     def handle_mms_exception_raised(self, exception):

@@ -93,7 +93,7 @@ class PrinterAdapter(BaseAdapter):
         return self.printer.is_shutdown()
 
     def emergency_stop(self, reason):
-        self.printer.invoke_shutdown(f"Shutdown by MMS: {reason}")
+        self.printer.invoke_shutdown(f"{reason}")
 
     def send_event(self, event, *params):
         return self.printer.send_event(event, *params)

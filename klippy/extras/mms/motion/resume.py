@@ -43,9 +43,13 @@ class MMSResume:
         self.mms_delivery = printer_adapter.get_mms_delivery()
         self.mms_charge = printer_adapter.get_mms_charge()
         self.mms_swap = printer_adapter.get_mms_swap()
+        self.mms_pause = self.mms.get_mms_pause()
 
         self.print_observer = self.mms.get_print_observer()
-        self.mms_pause = self.mms.get_mms_pause()
+        self.print_observer.register_start_callback(
+            self._handle_print_is_started)
+        self.print_observer.register_finish_callback(
+            self._handle_print_is_finished)
 
     def _initialize_gcode(self):
         commands = [
@@ -59,9 +63,18 @@ class MMSResume:
         self.log_warning = mms_logger.create_log_warning()
         self.log_error = mms_logger.create_log_error()
 
+    def _initialize_status(self):
+        self._is_resuming = False
+        self._mms_swap_resume_func = None
+        self._mms_swap_resume_gcmd = None
+        self._selected_slots = []
+
     # ---- Handlers ----
-    def handle_print_is_resumed(self):
-        return
+    def _handle_print_is_started(self):
+        self._initialize_status()
+
+    def _handle_print_is_finished(self):
+        self._initialize_status()
 
     # ---- Gcode control ----
     def gcode_resume(self):

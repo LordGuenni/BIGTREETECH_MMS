@@ -22,6 +22,9 @@ def is_outdated_val(section, option, old_val):
 \\nMANUAL_STEPPER STEPPER=drive_stepper ENABLE=0\
 \\nSET_HEATER_TEMPERATURE HEATER=ViViD_Dryer TARGET=0\
 \\nRESPOND TYPE=echo MSG='MMS DISABLE finish'"
+        },
+        "manual_stepper selector_stepper": {
+            "rotation_distance": "360"
         }
     }'''
     try:

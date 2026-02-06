@@ -1,5 +1,67 @@
 # MMS 更新日志
 
+## Ver 0.1.411
+
+- 修复 Delivery wait stepper idle 相关 bug
+
+## Ver 0.1.410
+
+- Selector refine calibration distance 可配置化
+- Endless Spool 未开启时逻辑更新
+
+## Ver 0.1.409
+
+- MMS Stepper running/wait_idle/terminate 机制迭代
+- SLOT/SLOT_Pin Homing terminal 相关逻辑抽象至各模块自身职能范围内
+
+## Ver 0.1.408
+
+- MMS Buffer feed/retract 小规模重构
+- 继续增加运动调度过程中对 distance/speed/accel 三个关键运动参数的强校验步骤
+- 修复非法运动参数导致 ManualMove.end_print_time 被错误赋空值导致的数学计算错误问题
+
+## Ver 0.1.407
+
+- 修复 MMS Stepper ManualMove 运动方式在小距离移动调度时距离丢失的问题
+
+## Ver 0.1.406
+
+- Delivery/Stepper 增加对 speed/accel 等运动参数的校验，防止非法负值/超大值/超小值的传入
+- 修正日志拼写错误
+
+## Ver 0.1.405
+
+- Delivery 调整 Stepper:Selector 固定距离移动相关参数
+- Delivery 新增 MMS_TEST_SELECTOR，用于测试 Selector 移动的一致性
+- Delivery 新增 MMS_TEST_SELECTOR_MEASURE，用于测量 Pin:Selector 的可用触发区间
+- Stepper 增加运动结束后的距离监控日志输出
+
+## Ver 0.1.404
+
+- bigtreetech-mms/hardware/mms-stepper.cfg 配置变更
+- Delivery Stepper:Selector 相关调度逻辑变更
+- Stepper 调度核心参数 interval_time 采用差分策略配置
+
+## Ver 0.1.403
+
+- Stepper "Communication timeout during homing" 异常不再 Shutdown，改为上报业务层
+- Charge 变更 Careful Load 失败的异常处理逻辑，以适配 Stepper 的变动
+- Delivery Select SLOT 成功后终段的固定距离校准问题修复
+
+## Ver 0.1.402
+
+- 增强 MMS Pause/Resume 的状态管理
+- 修复 Charge 失败暂停后用户手动停止打印，新打印任务中 Charge 再次失败后暂停被跳过的问题
+
+## Ver 0.1.401
+
+- MMS Buffer 增强扩展 VVD/Buffer 场景下的日志输出
+- 修复 Extend 后多 Buffer 场景下，暂停恢复后 Monitor 错误监控 SLOT 导致送料异常问题
+
+## Ver 0.1.400
+
+- 新增 MMS_MAN 命令，自动记录并输出由 MMS 创建的原生命令
+
 ## Ver 0.1.0399
 
 - MMS Brush 修复 Peck 未启用时仍会移动到 PeckPoint 的多余操作问题

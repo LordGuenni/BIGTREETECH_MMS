@@ -165,6 +165,15 @@ class Buffer:
 
     # ---- Monitor ----
     def _monitor(self):
+        slot_num_cur = self.mms.get_current_slot(no_log=True)
+        if slot_num_cur not in self._binding_slot_nums:
+            # self.log_warning_s(
+            #     f"buffer[{self._index}] current slot: '{slot_num_cur}' "
+            #     f"not in bindings: {self._binding_slot_nums}, "
+            #     "monitor skip..."
+            # )
+            return
+
         self._check_sensors()
 
         # e_position = extruder_adapter.get_position()
@@ -178,8 +187,8 @@ class Buffer:
             self.log_warning_s(
                 "\n"
                 "########################################\n"
-                f"extruder moved distance {e_distance_moved:.2f}mm"
-                f" overlimit, skip...\n"
+                f"buffer[{self._index}] monitor extruder moved "
+                f"distance {e_distance_moved:.2f}mm is overlimit, skip...\n"
                 f"e_distance_moved: {e_distance_moved:.2f}\n"
                 f"e_position: {e_position:.2f}\n"
                 f"last_e_position: {self._last_e_position:.2f}\n"
@@ -194,7 +203,10 @@ class Buffer:
 
         # Extrude: e_distance_moved > 0
         # Retract: e_distance_moved < 0
-        self.log_info_s(f"extruder moved distance: {e_distance_moved:.2f} mm")
+        self.log_info_s(
+            f"buffer[{self._index}] monitor extruder "
+            f"moved distance: {e_distance_moved:.2f} mm"
+        )
 
         # Update last extruder position
         self._last_e_position = e_position
@@ -249,7 +261,7 @@ class Buffer:
 
         self.log_info_s(
             "\n"
-            "buffer volume update:\n"
+            f"buffer[{self._index}] volume update:\n"
             f"old: {old_volume:.2f}\n"
             f"new: {new_volume:.2f}\n"
             # f"set: {self._volume:.2f}\n"
@@ -258,10 +270,14 @@ class Buffer:
 
         if new_volume == self.max_volume:
             self.log_info_s(
-                f"buffer volume is full: {self.max_volume:.2f} mm^3")
+                f"buffer[{self._index}] volume is full: "
+                f"{self.max_volume:.2f} mm^3"
+            )
         elif new_volume == self.min_volume:
             self.log_info_s(
-                f"buffer volume is empty: {self.min_volume:.2f} mm^3")
+                f"buffer[{self._index}] volume is empty: "
+                f"{self.min_volume:.2f} mm^3"
+            )
 
     @contextmanager
     def _freeze_volume(self):
@@ -276,7 +292,11 @@ class Buffer:
         if not self._p_task \
             or self._p_task.is_running() \
             or self._is_activating:
-            self.log_warning_s("another buffer monitor task is activating")
+            self.log_warning_s(
+                f"buffer[{self._index}] another "
+                "buffer monitor task is activating, "
+                "activate monitor skip..."
+            )
             return
 
         # Reset last extruder position
@@ -286,10 +306,10 @@ class Buffer:
             if self._p_task.schedule(self._monitor):
                 self._p_task.start()
         except Exception as e:
-            self.log_error(f"buffer monitor activate error: {e}")
+            self.log_error(f"buffer[{self._index}] monitor activate error: {e}")
             return
 
-        self.log_info_s("buffer monitor activated")
+        self.log_info_s(f"buffer[{self._index}] monitor activated")
         self._is_activating = True
         self._inlet_has_triggered = False
 
@@ -302,23 +322,51 @@ class Buffer:
         try:
             self._p_task.stop()
         except Exception as e:
-            self.log_error(f"buffer monitor deactivate error: {e}")
+            self.log_error(
+                f"buffer[{self._index}] monitor deactivate error: {e}")
             return
 
-        self.log_info_s("buffer monitor deactivated")
+        self.log_info_s(f"buffer[{self._index}] monitor deactivated")
         self._is_activating = False
         self._inlet_has_triggered = False
 
     # ---- Feed & Retract ----
-    def _simple_move_pure(self, slot_num, distance, speed, accel):
-        mms_slot = self.mms.get_mms_slot(slot_num)
-        mms_drive = mms_slot.get_mms_drive()
-        mms_drive.update_focus_slot(slot_num)
-        # No select method
-        # if not mms_slot.selector_is_triggered():
-        #     self.mms_delivery.select_slot(slot_num)
-        # Manual Move
-        mms_drive.manual_move(distance, speed, accel)
+    def _validate_volume(self, volume):
+        valid = volume is not None and volume > 0
+        if not valid:
+            self.log_warning(
+                f"buffer[{self._index}] invalid volume: {volume}")
+        return valid
+
+    def _find_slot(self):
+        slot_num = self.mms.get_current_slot()
+        if slot_num is None:
+            self.log_warning(
+                f"buffer[{self._index}] no available slot found")
+        return slot_num
+
+    def _cal_move_params(self, volume, extrude_speed=None):
+        distance = abs(volume / self.filament_cross_section)
+        # extruder velocity could be 0
+        # speed = extruder_adapter.get_velocity() or distance
+
+        # 'distance' => 1s done
+        # 'distance' * 2 => 0.5s done
+        speed_d = distance * 2.0
+        speed = speed_d \
+            if extrude_speed is None \
+            else min(speed_d, extrude_speed)
+        # accel = speed
+        return distance, speed, speed
+
+    def _log_move(self, m_type, slot_num, volume, distance, speed, accel):
+        self.log_info_s(
+            f"\nslot[{slot_num}] buffer[{self._index}] {m_type}:\n"
+            f"volume: {volume:.2f} mm^3\n"
+            f"distance: {distance:.2f} mm\n"
+            f"speed: {speed:.2f} mm/s\n"
+            f"accel: {accel:.2f} mm/s^2"
+        )
 
     def _simple_move_abort(self, slot_num):
         if self.mms_endless_spool.is_inlet_released(slot_num):
@@ -347,83 +395,31 @@ class Buffer:
         # Inlet is triggered before manual_move and now is released
         self._simple_move_abort(slot_num)
 
-    def _feed(self, volume, extrude_speed):
-        if not volume or volume < 0:
-            self.log_warning(
-                f"buffer feed failed: unavailable volume: {volume}")
+    def _execute(self, m_type, volume, extrude_speed=None):
+        if not self._validate_volume(volume):
             return None
 
-        slot_num = self.mms.get_current_slot()
+        slot_num = self._find_slot()
         if slot_num is None:
-            self.log_warning("buffer feed failed: no active slot")
             return None
 
-        distance = volume / self.filament_cross_section
+        distance, speed, accel = self._cal_move_params(
+            volume, extrude_speed)
+        self._log_move(m_type, slot_num, volume, distance, speed, accel)
 
-        # extruder velocity could be 0
-        # speed = extruder_adapter.get_velocity() or distance
-        # 'distance' => 1s done
-        # 'distance' * 2 => 0.5s done
-        speed = (distance*2 if not extrude_speed
-                 else min(distance*2, extrude_speed))
-        accel = speed
-
-        self.log_info_s(
-            "\n"
-            f"slot[{slot_num}] buffer feed:\n"
-            f"volume: {volume:.2f} mm^3\n"
-            f"distance: {distance:.2f} mm\n"
-            f"speed: {speed:.2f} mm/s\n"
-            f"accel: {accel:.2f} mm/s^2"
-        )
-        # Simple log for console
-        # self.log_info(
-        #     f"slot[{slot_num}] buffer feed distance: {distance:.2f} mm")
-
+        dist = distance if m_type == "feed" else -distance
         try:
-            self._simple_move(slot_num, abs(distance), speed, accel)
+            self._simple_move(slot_num, dist, speed, accel)
             return volume
         except Exception as e:
-            self.log_error(f"buffer feed failed: {e}")
+            self.log_error(f"buffer[{self._index}] {m_type} failed: {e}")
+            return None
 
-        return None
+    def _feed(self, volume, extrude_speed):
+        return self._execute("feed", volume, extrude_speed)
 
     def _retract(self, volume):
-        if not volume or volume < 0:
-            self.log_warning(
-                f"buffer feed failed: unavailable volume: {volume}")
-            return None
-
-        slot_num = self.mms.get_current_slot()
-        if slot_num is None:
-            self.log_warning("buffer feed failed: no active slot")
-            return None
-
-        distance = volume / self.filament_cross_section
-        # 'distance' => 1s done
-        # 'distance' * 2 => 0.5s done
-        speed = distance * 2
-        accel = speed
-
-        self.log_info_s(
-            "\n"
-            f"slot[{slot_num}] buffer retract:\n"
-            f"volume: {volume:.2f} mm^3\n"
-            f"distance: {distance:.2f} mm\n"
-            f"speed: {speed:.2f} mm/s\n"
-            f"accel: {accel:.2f} mm/s^2"
-        )
-        # Simple log for console
-        # self.log_info(
-        #     f"slot[{slot_num}] buffer retract distance: {distance:.2f} mm")
-
-        try:
-            self._simple_move(slot_num, -abs(distance), speed, accel)
-            return volume
-        except Exception as e:
-            self.log_error(f"buffer retract failed: {e}")
-
-        return None
+        return self._execute("retract", volume, None)
 
     # ---- Control ----
     def fill(self, slot_num, speed=None, accel=None):
@@ -437,13 +433,19 @@ class Buffer:
             self.mms_delivery.load_to_outlet(
                 slot_num, speed=speed, accel=accel
             )
-            self.log_info_s(f"slot[{slot_num}] fill mms_buffer success")
+            self.log_info_s(
+                f"slot[{slot_num}] buffer[{self._index}] fill success"
+            )
             return True
         except DeliveryTerminateSignal:
-            self.log_error(f"slot[{slot_num}] fill mms_buffer is terminated")
+            self.log_error(
+                f"slot[{slot_num}] buffer[{self._index}] fill is terminated"
+            )
             return False
         except Exception as e:
-            self.log_error(f"slot[{slot_num}] fill mms_buffer error: {e}")
+            self.log_error(
+                f"slot[{slot_num}] buffer[{self._index}] fill error: {e}"
+            )
             return False
 
     def clear(self, slot_num, speed=None, accel=None):
@@ -457,13 +459,19 @@ class Buffer:
             self.mms_delivery.unload_until_buffer_runout_trigger(
                 slot_num, speed=speed, accel=accel
             )
-            self.log_info_s(f"slot[{slot_num}] clear mms_buffer success")
+            self.log_info_s(
+                f"slot[{slot_num}] buffer[{self._index}] clear success"
+            )
             return True
         except DeliveryTerminateSignal:
-            self.log_error(f"slot[{slot_num}] clear mms_buffer is terminated")
+            self.log_error(
+                f"slot[{slot_num}] buffer[{self._index}] clear is terminated"
+            )
             return False
         except Exception as e:
-            self.log_error(f"slot[{slot_num}] clear mms_buffer error: {e}")
+            self.log_error(
+                f"slot[{slot_num}] buffer[{self._index}] clear error: {e}"
+            )
             return False
 
     def halfway(self, slot_num, speed=None, accel=None):
@@ -493,14 +501,23 @@ class Buffer:
 
             # Finally set volume
             self._handle_half()
-            self.log_info_s(f"slot[{slot_num}] halfway mms_buffer success")
+            self.log_info_s(
+                f"slot[{slot_num}] buffer[{self._index}] "
+                "halfway success"
+            )
             return True
 
         except DeliveryTerminateSignal:
-            self.log_error(f"slot[{slot_num}] halfway mms_buffer is terminated")
+            self.log_error(
+                f"slot[{slot_num}] buffer[{self._index}] "
+                "halfway is terminated"
+            )
             return False
         except Exception as e:
-            self.log_error(f"slot[{slot_num}] halfway mms_buffer error: {e}")
+            self.log_error(
+                f"slot[{slot_num}] buffer[{self._index}] "
+                f"halfway error: {e}"
+            )
             return False
 
     def measure_stroke(self, slot_num, force=False):
@@ -510,7 +527,9 @@ class Buffer:
         try:
             mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
 
-            self.log_info_s(f"slot[{slot_num}] measure buffer stroke begin")
+            self.log_info_s(
+                f"slot[{slot_num}] buffer[{self._index}] measure stroke begin"
+            )
 
             self.mms_delivery.load_to_outlet(slot_num)
             self.mms_delivery.unload_until_buffer_runout_trigger(
@@ -524,15 +543,19 @@ class Buffer:
             self.spring_stroke = min(distance_moved, old_stroke)
             self._stroke_is_measured = True
             self.log_info_s(
-                "buffer spring stroke is measured, "
+                f"buffer[{self._index}] spring stroke is measured, "
                 f"update from {old_stroke} mm to {self.spring_stroke} mm")
 
         except DeliveryTerminateSignal:
             self.log_error(
-                f"slot[{slot_num}] measure mms_buffer is terminated")
+                f"slot[{slot_num}] buffer[{self._index}] "
+                "measure is terminated"
+            )
         except Exception as e:
             self.log_error(
-                f"slot[{slot_num}] measure mms_buffer stroke error: {e}")
+                f"slot[{slot_num}] buffer[{self._index}] "
+                f"measure stroke error: {e}"
+            )
 
     # ---- Pins trigger/release handlers and check ----
     def _handle_full(self, mcu_pin):

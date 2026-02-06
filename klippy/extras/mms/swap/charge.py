@@ -166,8 +166,10 @@ class MMSCharge:
                 mms_drive.update_focus_slot(slot_num)
                 mms_drive.manual_home(
                     distance = abs(distance),
-                    speed = speed, accel = speed,
-                    forward = True, trigger = True,
+                    speed = speed,
+                    accel = speed,
+                    forward = True,
+                    trigger = True,
                     endstop_pair_lst = endstop_pair_lst,
                 )
             self._drip_extrude_end = True
@@ -181,10 +183,10 @@ class MMSCharge:
             if async_task.setup(func, params):
                 async_task.start()
         except Exception as e:
-            self.log_error(
-                f"slot[{slot_num}] async careful load error: {e}")
-            return False
-        return True
+            raise ChargeFailedError(
+                f"slot[{slot_num}] async careful load error: {e}",
+                self.mms.get_mms_slot(slot_num)
+            )
 
     def _careful_unload(self, slot_num):
         self._drip_retract_end = False
@@ -341,11 +343,7 @@ class MMSCharge:
         )
 
         # Load task(async)
-        start = self._async_careful_load(slot_num, distance_total)
-        if not start:
-            # raise ChargeFailedError(f"{log_prefix} failed", mms_slot)
-            return False
-
+        self._async_careful_load(slot_num, distance_total)
         # Extruder task(block)
         self._careful_extrude(slot_num, distance_total)
 
@@ -470,8 +468,7 @@ class MMSCharge:
 
                     # Retry loop
                     self.log_info(
-                        f"{log_prefix} retry {i+1}/{retry_times} ..."
-                    )
+                        f"{log_prefix} retry {i+1}/{retry_times} ...")
 
                 # Retry end, not success
                 raise ChargeFailedError(

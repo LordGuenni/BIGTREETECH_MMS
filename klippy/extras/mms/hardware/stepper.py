@@ -15,7 +15,8 @@ from ...homing import HomingMove
 
 from ..adapters import (
     force_move_adapter as force_move_a,
-    manual_stepper_dispatch,
+    gcode_adapter,
+    manual_stepper_dispatch as ms_dispatch,
     motion_queuing_adapter as motion_queuing_a,
     printer_adapter,
     stepper_enable_adapter as stepper_enable_a,
@@ -30,12 +31,12 @@ from ..adapters import (
 class StepperConfig:
     # Delay for waiting to flush print_time, in seconds
     wait_delay: float = 0.05
-    # Period for manual move pause block loop, in seconds
-    # pause_period: float = 0.01
     # Interval for manual move print_time advancement, in seconds
-    interval_time: float = 1.0
-    # Delay before reset stepcompress in soft_stop(), in seconds
-    # soft_stop_delay: float = 0.15
+    interval_time_selector: float = 1.0
+    interval_time_drive: float = 1.0
+    # Wait idle
+    wait_idle_interval: float = 0.2 # seconds
+    wait_idle_timeout: float = 5 # seconds
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,13 @@ class MoveDispatch:
                 result = result
             )
 
+    # ---- Get status ----
+    def get_steps_moved(self):
+        return self.steps_moved or 0
+
+    def get_distance_moved(self):
+        return self.distance_moved or 0
+
 
 class ManualMoveDispatch(MoveDispatch):
     def __init__(self, stepper):
@@ -167,15 +175,12 @@ class ManualMoveDispatch(MoveDispatch):
         self._prepare_tracking()
         try:
             # Process move jobs in trapq, return end_print_time
-            end_print_time = motion_queuing_a.move(
-                self.trapq, print_time, distance, speed, accel
-            )
-            delay = end_print_time - print_time
-            self._wait(delay)
-            return end_print_time
-
+            return motion_queuing_a.move(
+                self.trapq, print_time, distance, abs(speed), abs(accel))
         except Exception as e:
             self.log_error(f"{self.move_type} error: {str(e)}")
+            # Return print_time as end_print_time
+            return print_time
         finally:
             self._recover_trapq(prev_trapq)
             self._update_tracking()
@@ -193,9 +198,9 @@ class ManualHomeDispatch(MoveDispatch):
         self._prepare_tracking()
 
         try:
-            ms_adapter = manual_stepper_dispatch.get_adapter(
+            ms_adapter = ms_dispatch.get_adapter(
                 self.stepper.get_name())
-            ms_adapter.set_home_accel(accel)
+            ms_adapter.set_home_accel(abs(accel))
 
             # Homing move
             hmove = HomingMove(
@@ -206,7 +211,7 @@ class ManualHomeDispatch(MoveDispatch):
             # Return triggered_pos => [distance, 0., 0., 0.]
             hmove.homing_move(
                 movepos = [distance, 0., 0., 0.],
-                speed = speed,
+                speed = abs(speed),
                 triggered = trigger,
                 check_triggered = False
             )
@@ -245,7 +250,7 @@ class DripMoveDispatch(MoveDispatch):
         try:
             # Setup move jobs in trapq, return end_print_time
             end_print_time = motion_queuing_a.setup_trapq(
-                self.trapq, print_time, distance, speed, accel
+                self.trapq, print_time, distance, abs(speed), abs(accel)
             )
             # Setup reactor completion
             self._drip_completion = self.reactor.completion()
@@ -268,6 +273,8 @@ class DripMoveDispatch(MoveDispatch):
 
         except Exception as e:
             self.log_error(f"{self.move_type} error: {str(e)}")
+            # Return print_time as end_print_time
+            return print_time
         finally:
             self._recover_trapq(prev_trapq)
             self._update_tracking()
@@ -325,9 +332,6 @@ class MMSStepper:
         self.log_info = mms_logger.create_log_info(console_output=False)
         self.log_warning = mms_logger.create_log_warning(console_output=False)
         # self.log_error = mms_logger.create_log_error()
-
-    def is_running(self):
-        return self._is_running
 
     def is_init(self):
         # Init status, never run before
@@ -415,7 +419,7 @@ class MMSStepper:
             "mms_name" : self.mms_name,
             # The focusing slot of stepper
             "focus_slot" : self._focus_slot,
-            "is_running" : self._is_running,
+            "is_running" : self.is_running(),
             "forward" : self._forward,
 
             # Current move statement
@@ -454,19 +458,19 @@ class MMSStepper:
 
     def get_steps_moved(self):
         dispatch = self.get_dispatch()
-        return dispatch.steps_moved if dispatch else 0
+        return 0 if not dispatch else dispatch.get_steps_moved()
 
     def get_distance_moved(self):
         dispatch = self.get_dispatch()
-        return dispatch.distance_moved if dispatch else 0
+        return 0 if not dispatch else dispatch.get_distance_moved()
 
     def get_position(self):
         # Return current position
-        return self.get_mcu_stepper().get_commanded_position()
+        return self.get_mcu_stepper().get_commanded_position() or 0
 
     def get_step(self):
         # Return current MCU steps
-        return self.get_mcu_stepper().get_mcu_position()
+        return self.get_mcu_stepper().get_mcu_position() or 0
 
     def reset_position(self):
         # Reset position to avoid "Stepcompress error"
@@ -474,7 +478,7 @@ class MMSStepper:
         # Notice: ManualStepper may save ManualStepper.commanded_pos
         # itself, which use to calculate distance in homing.
         # So update position not only with MCU_Stepper but alse ManualStepper.
-        ms_adapter = manual_stepper_dispatch.get_adapter(self.name)
+        ms_adapter = ms_dispatch.get_adapter(self.name)
         ms_adapter.reset_position()
 
     def set_trapq(self, trapq):
@@ -499,8 +503,41 @@ class MMSStepper:
             and self.move_type is mt_home \
             and dispatch.is_destination(mcu_pin)
 
+    def _log_review(self, move_type, distance):
+        distance_m = self.get_distance_moved()
+        gap = distance_m - distance
+        if abs(int(gap)) > 0:
+            self.log_warning("\n"
+                "##########\n"
+                f"{move_type} review:\n"
+                f"step_dist : {self.get_step_dist():.4f} mm\n"
+                f"steps : {self.get_steps_moved()}\n"
+                f"request : {distance:.2f} mm\n"
+                f"moved: {distance_m:.2f} mm\n"
+                f"moved-request = {gap:.2f} mm\n"
+                "##########"
+            )
+
     # ---- Control ----
+    def is_running(self):
+        return self._is_running
+
+    def _set_is_running(self):
+        # self.log_info(f"[{self.mms_name}] running begin @@@")
+        self._reset_move_status(MoveStatus.MOVING)
+        self._is_running = True
+        printer_adapter.notify_mms_stepper_running()
+
+    def _free_is_running(self):
+        # self.log_info(f"[{self.mms_name}] running end @@@")
+        self._is_running = False
+        printer_adapter.notify_mms_stepper_idle()
+        if self.move_status == MoveStatus.MOVING:
+            # Not completed/terminated/error, mark as expired
+            self._update_move_status(MoveStatus.EXPIRED)
+
     def _cal_enable_print_time(self):
+        # Warning, don't adde interval with print_time here
         cal_pt = self._cal_print_time(add_interval=False)
         th_pt = toolhead_a.get_print_time()
         # self.log_info(
@@ -547,30 +584,61 @@ class MMSStepper:
         Yields:
             None
         """
-        if self._is_running:
-            self.log_warning(f"[{self.mms_name}] is still running,"
-                             f" move skip...")
+        if self.is_running():
+            self.log_warning(f"[{self.mms_name}] is still running...")
             # Even confident is true, still yield to make sure generator return
             # yield at least once
             yield False
             return
 
         self.move_type = move_type
-        self._is_running = True
-        self._reset_move_status(MoveStatus.MOVING)
-        printer_adapter.notify_mms_stepper_running()
+        self._set_is_running()
         # Force enable stepper before run
         self.enable()
         try:
             yield True
         finally:
-            self._is_running = False
-            if self.move_status == MoveStatus.MOVING:
-                # Not completed or terminated, mark as expired
-                self._update_move_status(MoveStatus.EXPIRED)
-            printer_adapter.notify_mms_stepper_idle()
+            self._free_is_running()
 
-    def _cal_print_time(self, add_interval=True):
+    def wait_idle(self, interval=None, timeout=None):
+        if not self.is_running():
+            return True, 0
+
+        interval = abs(interval or self.s_config.wait_idle_interval)
+        timeout = abs(timeout or self.s_config.wait_idle_timeout)
+
+        begin_at = time.time()
+        steps_moved = self.get_step()
+        log_prefix = f"[{self.mms_name}] wait idle"
+
+        # Wait until timeout or idle
+        while self.is_running():
+            # First wait
+            self.pause(interval)
+
+            # Calculate elapsed time
+            elapsed_time = time.time() - begin_at
+            if elapsed_time > timeout:
+                # Timeout, return
+                self.log_warning(
+                    f"{log_prefix} timeout after {elapsed_time:.2f}s")
+                return False, elapsed_time
+
+            # Check steps moved
+            if self.get_step() == steps_moved:
+                # No more new steps, is not running
+                self._free_is_running()
+            else:
+                # Update
+                steps_moved = self.get_step()
+
+        # Idle
+        elapsed_time = time.time() - begin_at
+        if elapsed_time > 0.1:
+            self.log_info(f"{log_prefix} reached in {elapsed_time:.2f}s")
+        return True, elapsed_time
+
+    def _cal_print_time(self, add_interval=False):
         """
         Calculate the estimated print time.
         This method retrieves the estimated print time from the MCU
@@ -579,14 +647,13 @@ class MMSStepper:
             float: The final estimated print time.
         """
         print_time = self.get_mcu().estimated_print_time(
-            self.reactor.monotonic()
-        )
+            self.reactor.monotonic())
         if add_interval:
-            print_time += self.s_config.interval_time
+            print_time += self.interval_time
         return print_time
 
     def _adjust_print_time(self):
-        print_time = self._cal_print_time()
+        print_time = self._cal_print_time(add_interval=True)
         if print_time < self._end_print_time:
             # Last round is not done yet
             # Wait to avoid "Stepcompress error"
@@ -614,50 +681,75 @@ class MMSStepper:
     # ---- Public Movement Methods ----
     # -- Manual Move --
     def manual_move(self, distance, speed, accel):
-        mv_type = MoveType.MANUAL_MOVE
-        self._forward = True if distance >= 0 else False
+        if not distance:
+            return
 
-        with self._stepper_is_running(mv_type) as can_run:
-            if can_run:
+        mv_type = MoveType.MANUAL_MOVE
+        self._forward = distance >= 0
+
+        try:
+            with self._stepper_is_running(mv_type) as can_run:
+                if not can_run:
+                    return
+
                 print_time = self._adjust_print_time()
                 dispatch = self.get_dispatch(mv_type)
                 self._end_print_time = dispatch.execute(
-                    print_time, distance, speed, accel)
-                # self.log_status()
+                    print_time, distance, speed, accel
+                )
+        except Exception as e:
+            self.move_status = MoveStatus.ERROR
+            raise
+        finally:
+            # self.log_status()
+            self._log_review(mv_type, distance)
+            # self.wait_idle()
 
     # -- Manual Home --
     def manual_home(
         self, distance, speed, accel, forward, trigger, endstop_pair_lst
     ):
+        if not distance:
+            return
+
         mv_type = MoveType.MANUAL_HOME
         distance = abs(distance) if forward else -abs(distance)
         self._forward = forward
 
-        with self._stepper_is_running(mv_type) as can_run:
-            if can_run:
+        try:
+            with self._stepper_is_running(mv_type) as can_run:
+                if not can_run:
+                    return self.move_status
+
                 self._can_calibrate = True
                 self._sync_print_time()
                 dispatch = self.get_dispatch(mv_type)
 
-                try:
-                    endstop_name = dispatch.execute(
-                        distance, speed, accel, trigger, endstop_pair_lst)
+                endstop_name = dispatch.execute(
+                    distance, speed, accel, trigger, endstop_pair_lst
+                )
 
-                    if endstop_name is not None \
-                        and self.get_distance_moved() == 0:
-                        # Endstop is triggered without moving
-                        self.complete_manual_home()
-                        self._can_calibrate = False
-                except (CommandError, MCUError) as e:
-                    self.move_status = MoveStatus.ERROR
-                    printer_adapter.emergency_stop(e)
-                    raise
+                if endstop_name is not None \
+                    and self.get_distance_moved() == 0:
+                    # Endstop is triggered without moving
+                    self.complete_manual_home()
+                    self._can_calibrate = False
 
-        self.log_status()
-        return self.move_status
+            return self.move_status
+
+        except (CommandError, MCUError) as e:
+            self.move_status = MoveStatus.ERROR
+            gcode_adapter.respond_error(e)
+            raise
+        except Exception as e:
+            self.move_status = MoveStatus.ERROR
+            raise
+        finally:
+            self.log_status()
+            # self.wait_idle()
 
     def complete_manual_home(self):
-        if not self._is_running:
+        if not self.is_running():
             self.log_warning(
                 f"[{self.mms_name}] is not running, "
                 "complete failed"
@@ -665,47 +757,58 @@ class MMSStepper:
             return
         self._update_move_status(MoveStatus.COMPLETED)
 
-    def terminate_manual_home(self):
-        if not self._is_running:
-            self.log_warning(
-                f"[{self.mms_name}] is not running, "
-                "terminate failed...")
-            return
-        self._update_move_status(MoveStatus.TERMINATED)
-
     def can_calibrate(self):
         return self._can_calibrate
 
     # -- Drip Move --
     def drip_move(self, distance, speed, accel):
+        if not distance:
+            return
+
         mv_type = MoveType.DRIP_MOVE
         self._forward = True if distance >= 0 else False
 
-        with self._stepper_is_running(mv_type) as can_run:
-            if can_run:
+        try:
+            with self._stepper_is_running(mv_type) as can_run:
+                if not can_run:
+                    return
+
                 print_time = self._adjust_print_time()
                 dispatch = self.get_dispatch(mv_type)
                 self._end_print_time = dispatch.execute(
-                    print_time, distance, speed, accel)
+                    print_time, distance, speed, accel
+                )
+        except Exception as e:
+            self.move_status = MoveStatus.ERROR
+            raise
+        # finally:
+        #     # self.log_status()
+        #     # self._log_review(mv_type, distance)
+        #     self.wait_idle()
 
-    def terminate_drip_move(self):
-        if not self._is_running:
-            self.log_warning(
-                f"[{self.mms_name}] is not running, "
-                "terminate failed"
-            )
+    # -- Terminate --
+    def terminate_moving(self):
+        if not self.is_running() \
+            or self.move_type not in (
+                MoveType.MANUAL_HOME,
+                MoveType.DRIP_MOVE
+            ):
             return
-        self.get_dispatch(MoveType.DRIP_MOVE).terminate()
+        self.log_info(f"[{self.mms_name}] terminate {self.move_type}")
+        self.get_dispatch(self.move_type).terminate()
         self._update_move_status(MoveStatus.TERMINATED)
+        # self.wait_idle()
 
 
 class MMSSelector(MMSStepper):
     def __init__(self, name):
         super().__init__(name)
         self.mms_name = "Selector"
+        self.interval_time = self.s_config.interval_time_selector
 
 
 class MMSDrive(MMSStepper):
     def __init__(self, name):
         super().__init__(name)
         self.mms_name = "Drive"
+        self.interval_time = self.s_config.interval_time_drive
