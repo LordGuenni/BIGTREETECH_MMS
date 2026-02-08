@@ -18,7 +18,7 @@ You can obtain these serial IDs using either of the following methods.
 
     IDs containing `stm32g0b1xx_vivid`correspond to ` ViViD`.
 
-    ```
+    ``` bash
     ls /dev/serial/by-id/*
     ```
 
@@ -71,9 +71,7 @@ When loading filament from `Inlet to Gate`, if the feed distance exceeds the max
     To enable it, remove the leading `#` and space, then set the correct pin (for example, `EBBCan:gpio21`).
  
 * 4: Filament Runout Detection - Continuously monitors the Inlet sensor and immediately pauses printing when the active slot runs out of filament.
-* 5: Automatic Filament Substitution - When filament runs out during printing, the system automatically switches to the slot defined by `substitute_with` in `mms-slot.cfg`
-
- (**Note:** Requires `fracture_detection_enable`to be enabled).
+* 5: Automatic Filament Substitution - When filament runs out during printing, the system automatically switches to the slot defined by `endless_with_slot` in `mms-slot.cfg` (**Note:** Requires `filament_detection_enable`to be enabled).
 
 #### MMS Logger Configuration
 
@@ -146,6 +144,8 @@ After the command completes, the Z-axis returns to its original height.
 * extrude_distance: The length the Extruder extrudes during each attempt to grip the filament and release the Outlet sensor.
 * extrude_times: The maximum number of extrusion attempts during a single charge operation.
 * extrude_speed: The extrusion speed during charge attempts.
+* drip_extrude_distance: The single feed distance when both the extruder and ViViD are feeding simultaneously during charge. For example, if `drip_extra_distance = 10` and `drip_extrude_distance = 1`, the result is a single feed of 1mm, with a maximum total feed of 10 times (to avoid damage to filament, if the Outlet sensor triggers early, the process will be terminated prematurely)
+* drip_extra_distance: The maximum distance between the extruder and ViViD feeding simultaneously during charge (to avoid damage to filament, if the Outlet sensor triggers early, the process will be terminated prematurely)
 * distance_unload: The amount of filament retracted after a charge failure to release the Outlet sensor.
 * custom_before: G-code executed before the charge operation, for custom actions.
 * custom_after: G-code executed before the charge operation, for custom actions.
@@ -263,8 +263,12 @@ Cleans residual filament from the nozzle and cutter area after loading new mater
 
 <img src="../img/purge_purge_3.png" width="800"/>
 
+* axis_first:
+    * `X`: Move the X-axis first, then move the Y-axis
+    * `Y`: Move the Y-axis first, then move the X-axis
+    * `XY`: X, Y-axis moves simultaneously
 * tray_point: Coordinate position where the toolhead parks during purge process.
-* eject_point: Has no meaning in the current version; no need to modify this setting.
+* eject_point: Some printers of trash can use a moving toolhead compression elastic mechanism to release and eject the purged out old filament. This parameter is used to configure the endpoint coordinates that the toolhead needs to move when ejection filament
 * custom_before: G-code commands to execute *before* purge, for custom actions.
 * custom_after: G-code commands to execute *after* purge is complete, for custom actions.
 
@@ -311,7 +315,7 @@ Moves the toolhead to a fixed location (where a brush is located) and moves the 
 
 * `1: brightness`: Configurable RGB brightness, where 1.0 represents 100% brightness.
 * `2: autoload_enable`: After enabling `mms autoload` in base/`mms-motion.cfg`, this setting allows the corresponding slot to be individually "enabled" or "disabled" for the automatic loading feature.
-* `3: substitute_with`: After enabling `slot_substitute_enable` in `mms/mms.cfg`, the corresponding slot needs to set this configuration. `During printing`, when the filament in this slot runs out  (inlet not triggered), printing will automatically continue using the filament from the slot specified in this configuration.
+* `3: endless_with_slot`: After enabling `endless_spool_enable` in `mms/mms.cfg`, the corresponding slot needs to set this configuration. `During printing`, when the filament in this slot runs out  (inlet not triggered), printing will automatically continue using the filament from the slot specified in this configuration.
 
-    **For example**, in the diagram, slot0's substitute_with is set to 1. So `during printing`, when slot0's filament runs out, it will automatically load filament from slot1 to continue printing.
+    **For example**, in the diagram, slot0's endless_with_slot is set to 1. So `during printing`, when slot0's filament runs out, it will automatically load filament from slot1 to continue printing.
 
