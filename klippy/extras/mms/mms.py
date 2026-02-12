@@ -36,7 +36,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0411"
+    version: str = "0.1.0415"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -393,10 +393,21 @@ class MMS:
 
         # Register Eject for Print finish
         self.print_observer.register_finish_callback(
-            self.mms_eject.mms_eject)
+            self.mms_eject.mms_eject_unselect)
         # Register Charge teardown for Print finish
         self.print_observer.register_finish_callback(
             self.mms_charge.teardown)
+
+        for mms_drive in self.mms_drives:
+            self.print_observer.register_mms_stepper(
+                mms_drive,
+                mms_drive.handle_is_not_running
+            )
+        for mms_selector in self.mms_selectors:
+            self.print_observer.register_mms_stepper(
+                mms_selector,
+                mms_selector.handle_is_not_running
+            )
 
     def welcome(self):
         self.log_info(self.mms_config.welcome)
@@ -1033,15 +1044,6 @@ class MMS:
         mms_slot.slot_rfid.rfid_truncate()
 
     def cmd_MMS_TEST(self, gcmd):
-        # mcu = self.mms_selectors[0].get_mcu()
-        # mcu_name = mcu._name
-        # mcu_rm = mcu._conn_helper._restart_helper._restart_method
-        # self.log_info("\n"
-        #    "mcu name:\n"
-        #    f"{mcu_name}\n"
-        #    "mcu restart_method:\n"
-        #    f"{mcu_rm}\n"
-        # )
         return
 
 

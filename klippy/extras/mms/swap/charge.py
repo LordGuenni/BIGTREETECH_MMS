@@ -159,7 +159,7 @@ class MMSCharge:
         endstop_pair_lst = mms_slot.format_endstop_pair(pin_type)
         speed = extruder_adapter.transform_speed(self.extrude_speed)
 
-        # # No retry loop
+        # No retry loop
         with wait_func():
             self._drip_extrude_end = False
             with self.mms_fil_detection.monitor(slot_num):

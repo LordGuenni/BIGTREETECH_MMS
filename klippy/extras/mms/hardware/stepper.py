@@ -34,9 +34,6 @@ class StepperConfig:
     # Interval for manual move print_time advancement, in seconds
     interval_time_selector: float = 1.0
     interval_time_drive: float = 1.0
-    # Wait idle
-    wait_idle_interval: float = 0.2 # seconds
-    wait_idle_timeout: float = 5 # seconds
 
 
 @dataclass(frozen=True)
@@ -85,8 +82,7 @@ class MoveDispatch:
 
     def _initialize_loggers(self):
         mms_logger = printer_adapter.get_mms_logger()
-        self.log_info = mms_logger.create_log_info(console_output=False)
-        # self.log_warning = mms_logger.create_log_warning()
+        # self.log_warning = mms_logger.create_log_warning(console_output=True)
         self.log_error = mms_logger.create_log_error(console_output=True)
 
     def execute(self, *args, **kwargs):
@@ -440,6 +436,9 @@ class MMSStepper:
     def get_name(self):
         return self.name
 
+    def get_mms_name(self):
+        return self.mms_name
+
     def set_index(self, index):
         self._index = index
 
@@ -523,18 +522,27 @@ class MMSStepper:
         return self._is_running
 
     def _set_is_running(self):
-        # self.log_info(f"[{self.mms_name}] running begin @@@")
-        self._reset_move_status(MoveStatus.MOVING)
+        if self.is_running():
+            return
+
         self._is_running = True
         printer_adapter.notify_mms_stepper_running()
+        self._reset_move_status(MoveStatus.MOVING)
 
     def _free_is_running(self):
-        # self.log_info(f"[{self.mms_name}] running end @@@")
+        if not self.is_running():
+            return
+
         self._is_running = False
         printer_adapter.notify_mms_stepper_idle()
+
         if self.move_status == MoveStatus.MOVING:
             # Not completed/terminated/error, mark as expired
             self._update_move_status(MoveStatus.EXPIRED)
+
+    def handle_is_not_running(self):
+        self.log_info(f"[{self.mms_name}] handle is not running")
+        self._free_is_running()
 
     def _cal_enable_print_time(self):
         # Warning, don't adde interval with print_time here
@@ -599,44 +607,6 @@ class MMSStepper:
             yield True
         finally:
             self._free_is_running()
-
-    def wait_idle(self, interval=None, timeout=None):
-        if not self.is_running():
-            return True, 0
-
-        interval = abs(interval or self.s_config.wait_idle_interval)
-        timeout = abs(timeout or self.s_config.wait_idle_timeout)
-
-        begin_at = time.time()
-        steps_moved = self.get_step()
-        log_prefix = f"[{self.mms_name}] wait idle"
-
-        # Wait until timeout or idle
-        while self.is_running():
-            # First wait
-            self.pause(interval)
-
-            # Calculate elapsed time
-            elapsed_time = time.time() - begin_at
-            if elapsed_time > timeout:
-                # Timeout, return
-                self.log_warning(
-                    f"{log_prefix} timeout after {elapsed_time:.2f}s")
-                return False, elapsed_time
-
-            # Check steps moved
-            if self.get_step() == steps_moved:
-                # No more new steps, is not running
-                self._free_is_running()
-            else:
-                # Update
-                steps_moved = self.get_step()
-
-        # Idle
-        elapsed_time = time.time() - begin_at
-        if elapsed_time > 0.1:
-            self.log_info(f"{log_prefix} reached in {elapsed_time:.2f}s")
-        return True, elapsed_time
 
     def _cal_print_time(self, add_interval=False):
         """
@@ -703,7 +673,6 @@ class MMSStepper:
         finally:
             # self.log_status()
             self._log_review(mv_type, distance)
-            # self.wait_idle()
 
     # -- Manual Home --
     def manual_home(
@@ -746,7 +715,6 @@ class MMSStepper:
             raise
         finally:
             self.log_status()
-            # self.wait_idle()
 
     def complete_manual_home(self):
         if not self.is_running():
@@ -784,7 +752,6 @@ class MMSStepper:
         # finally:
         #     # self.log_status()
         #     # self._log_review(mv_type, distance)
-        #     self.wait_idle()
 
     # -- Terminate --
     def terminate_moving(self):
@@ -797,18 +764,17 @@ class MMSStepper:
         self.log_info(f"[{self.mms_name}] terminate {self.move_type}")
         self.get_dispatch(self.move_type).terminate()
         self._update_move_status(MoveStatus.TERMINATED)
-        # self.wait_idle()
 
 
 class MMSSelector(MMSStepper):
     def __init__(self, name):
         super().__init__(name)
-        self.mms_name = "Selector"
+        self.mms_name = "stepper selector"
         self.interval_time = self.s_config.interval_time_selector
 
 
 class MMSDrive(MMSStepper):
     def __init__(self, name):
         super().__init__(name)
-        self.mms_name = "Drive"
+        self.mms_name = "stepper drive"
         self.interval_time = self.s_config.interval_time_drive

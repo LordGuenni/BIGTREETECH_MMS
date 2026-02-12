@@ -22,12 +22,12 @@ class MMSEndlessSpoolConfig:
     truncate_distance: float = 2000
     truncate_orphan_distance: float = 200
     extrude_distance_max: float = 5000
-    hint_prompt: str = """
-        The filament in slot[{slot_num}] has runout.\n
-        Please clear any remaining filament.\n
-        After inserting a new filament,
-        click RESUME to resume printing.
-    """
+    hint_prompt: str = (
+        "The filament in slot[{slot_num}] has runout. "
+        "Please clear any remaining filament. "
+        "After inserting a new filament, "
+        "click RESUME to resume printing."
+    )
 
     def get_hint(self, slot_num):
         return self.hint_prompt.format(slot_num=slot_num)
@@ -179,6 +179,8 @@ class MMSEndlessSpool:
 
     def _pause_and_hint(self, slot_num):
         self._pause(slot_num)
+        # No exception raise, activate led effect
+        self.mms.get_mms_slot().slot_led.activate_blinking()
         self.log_info(self.es_config.get_hint(slot_num))
 
     def _pause_and_wait(self, slot_num):

@@ -4,7 +4,9 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
+import time
 from dataclasses import dataclass
+from typing import Callable, Dict, Optional
 
 from .task import PeriodicTask
 from ..adapters import (
@@ -62,6 +64,7 @@ class PrintObserver:
     def _initialize_callback_managers(self):
         self.cb_manager = CallbackManager()
         self.dcb_manager = DisposableCallbackManager()
+        self.stp_manager = StepperRunningManager()
         # idle_timeout_adapter.setup_callback_manager()
 
     def _run_task(self):
@@ -81,6 +84,8 @@ class PrintObserver:
     # ---- Observe ----
     def _observe(self):
         """Periodic task monitoring print state changes"""
+        self.stp_manager.check_running()
+
         self.state_prev = self.state
         self.state = print_stats_adapter.get_state()
         # Skip processing if state hasn't changed
@@ -151,6 +156,9 @@ class PrintObserver:
 
     def register_resume_callback_disposable(self, callback, params=None):
         self.dcb_manager.register_resume_callback(callback, params)
+
+    def register_mms_stepper(self, mms_stepper, handler):
+        self.stp_manager.register(mms_stepper, handler)
 
 
 class CallbackManager:
@@ -278,3 +286,76 @@ class DisposableCallbackManager(CallbackManager):
         except Exception as e:
             self.log_error(
                 f"'{event_type}' disposable callback truncate error: {e}")
+
+
+@dataclass
+class StepperInfo:
+    mms_stepper: object
+    handler: Callable[[], None]
+    idle_timeout: float
+    # Default is None
+    steps_moved: Optional[int] = None
+    updated_at: Optional[float] = None
+
+    # @property
+    # def is_stalled(self, timeout):
+    #     if self.steps_moved is None or self.updated_at is None:
+    #         return False
+    #     return self.stepper.is_running() \
+    #         and (time.time() - self.updated_at) > timeout
+
+    def is_running(self):
+        return self.mms_stepper.is_running()
+
+    def update_if_changed(self, current_steps):
+        if current_steps != self.steps_moved:
+            # Steps is changed, update timestamp
+            self.steps_moved = current_steps
+            self.updated_at = time.time()
+            return True
+        return False
+
+    def is_idled(self):
+        if self.updated_at is None:
+            return False
+        return (time.time() - self.updated_at) > self.idle_timeout
+
+    def reset_timestamp(self):
+        self.updated_at = None
+
+
+class StepperRunningManager:
+    def __init__(self):
+        self._idle_timeout = 2.0 # Seconds
+        self._steppers = {}
+
+    def register(self, mms_stepper, handler):
+        name = mms_stepper.get_name()
+        if name in self._steppers:
+            return
+
+        # Setup with info class
+        self._steppers[name] = StepperInfo(
+            mms_stepper = mms_stepper,
+            handler = handler,
+            idle_timeout = self._idle_timeout
+        )
+
+    def unregister(self, stepper_name):
+        return self._steppers.pop(stepper_name, None) is not None
+
+    def check_running(self):
+        for s_info in self._steppers.values():
+            # Skip if is not running
+            if not s_info.is_running():
+                s_info.reset_timestamp()
+                continue
+
+            cur_steps = s_info.mms_stepper.get_step()
+            if s_info.update_if_changed(cur_steps):
+                continue
+
+            # Steps is not changed, check idle timeout
+            if s_info.is_idled():
+                s_info.handler()
+                s_info.reset_timestamp()

@@ -1,5 +1,25 @@
 # MMS 更新日志
 
+## Ver 0.1.415
+
+- ChangeLog 补充
+
+## Ver 0.1.414
+
+- 打印结束时注册的回调从 mms_eject 改为 mms_eject_unselect，即增加 unselect 功能
+
+## Ver 0.1.413
+
+- Buffer 简化日志输出
+- Stepper wait_idle() 控制删除，is_running 软锁控制机制变更
+- Observer 新增 StepperInfo，在 Observer 中注册/管理 mms stepper 信息
+- Observer 新增 StepperRunningManager，负责在观察循环里检查注册 MMS 电机的运动状态，判断步进电机是否实际运动中（理论上同样可以用于判断是否抱死）
+
+## Ver 0.1.412
+
+- Buffer/Delivery 优化日志输出
+- Delivery 增加管理调度定向定距离移动的统一方法，其他模块（如 Purge）对应逻辑更新
+
 ## Ver 0.1.411
 
 - 修复 Delivery wait stepper idle 相关 bug

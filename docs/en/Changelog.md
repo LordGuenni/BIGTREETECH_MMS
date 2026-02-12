@@ -1,5 +1,25 @@
 # MMS Change Log
 
+## Ver 0.1.415
+
+- ChangeLog supplement
+
+## Ver 0.1.414
+
+- The callback registered at the 'finish' state of printing has been changed from mms_eject to mms_eject_unselect, adding the unselect function.
+
+## Ver 0.1.413
+
+- Simplified log output for MMS Buffer
+- Removed Stepper wait_idle() control and changed the 'is_running' soft lock control mechanism
+- Added StepperInfo to Observer to register and manage mms stepper information in Observer
+- Added StepperRunningManager to Observer, which is responsible for checking the motion status of registered MMS motors in the observation loop and judging whether the stepper motor is actually in motion (theoretically can also be used to judge whether it is stalled)
+
+## Ver 0.1.412
+
+- Optimized log output for Buffer/Delivery
+- Added a unified method for managing and scheduling directional fixed-distance movement in Delivery, and updated the corresponding logic in other modules (such as Purge)
+
 ## Ver 0.1.411
 
 - Fixed bugs related to Delivery wait stepper idle

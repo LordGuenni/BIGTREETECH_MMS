@@ -402,12 +402,15 @@ class MMSEject:
         return True
 
     # ---- GCode ----
+    def mms_eject_unselect(self):
+        self.mms_eject()
+        self.mms_delivery.unselect()
+
     @log_time_cost("log_info_s")
     def cmd_MMS_EJECT(self, gcmd):
         with toolhead_adapter.snapshot():
             with toolhead_adapter.safe_z_raise(self.z_raise):
-                self.mms_eject()
-                self.mms_delivery.unselect()
+                self.mms_eject_unselect()
 
 
 def load_config(config):

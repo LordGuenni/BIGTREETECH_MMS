@@ -223,31 +223,6 @@ class MMSPurge:
         )
 
     # ---- Task ----
-    def _async_purge_feed(self, slot_num, distance):
-        # Setup and start task in background
-        func = self._purge_feed_task
-        params = {"slot_num" : slot_num, "distance" : distance}
-        async_task = AsyncTask()
-        try:
-            if async_task.setup(func, params):
-                async_task.start()
-        except Exception as e:
-            self.log_error(f"slot[{slot_num}] async purge_feed error: {e}")
-            return False
-        return True
-
-    def _purge_feed_task(self, slot_num, distance):
-        mms_slot = self.mms.get_mms_slot(slot_num)
-        mms_drive = mms_slot.get_mms_drive()
-        mms_drive.update_focus_slot(slot_num)
-
-        # No select method
-        distance = abs(distance)
-        spd = extruder_adapter.transform_speed(self.purge_speed)
-        mms_drive.manual_move(distance, spd, spd)
-
-        self.log_info_s(f"slot[{slot_num}] deliver distance={distance:.2f} mm")
-
     def _async_cold_pull(self, slot_num, distance, speed):
         # Setup and start task in background
         func = self._cold_pull_task
@@ -269,13 +244,29 @@ class MMSPurge:
         self.mms_delivery.mms_move(
             slot_num, -abs(distance), speed, speed)
 
+    def _async_purge_feed(self, slot_num, distance):
+
+        def _task():
+            # No select method
+            spd = extruder_adapter.transform_speed(self.purge_speed)
+            self.mms_delivery.mms_drive_move(
+                slot_num, abs(distance), spd, spd)
+
+        try:
+            async_task = AsyncTask()
+            if async_task.setup(_task):
+                async_task.start()
+        except Exception as e:
+            self.log_error(f"slot[{slot_num}] async purge_feed error: {e}")
+            return False
+        return True
+
     def _async_move_forward(self, slot_num, distance, speed):
 
         def _task():
             self.mms_delivery.mms_move(
                 slot_num, abs(distance), speed, speed)
 
-        # Setup and start task in background
         try:
             async_task = AsyncTask()
             if async_task.setup(_task):
@@ -291,7 +282,6 @@ class MMSPurge:
             self.mms_delivery.mms_move(
                 slot_num, -abs(distance), speed, speed)
 
-        # Setup and start task in background
         try:
             async_task = AsyncTask()
             if async_task.setup(_task):

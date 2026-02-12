@@ -185,17 +185,14 @@ class Buffer:
         elif e_distance_moved <= self.e_distance_moved_min \
             or abs(e_distance_moved) >= self.e_distance_moved_max:
             self.log_warning_s(
-                "\n"
-                "########################################\n"
-                f"buffer[{self._index}] monitor extruder moved "
-                f"distance {e_distance_moved:.2f}mm is overlimit, skip...\n"
-                f"e_distance_moved: {e_distance_moved:.2f}\n"
-                f"e_position: {e_position:.2f}\n"
-                f"last_e_position: {self._last_e_position:.2f}\n"
-                f"e_distance_moved_min: {self.e_distance_moved_min:.2f}\n"
-                f"e_distance_moved_max: {self.e_distance_moved_max:.2f}\n"
-                # f"extruder speed: {e_speed}\n"
-                "########################################"
+                f"buffer[{self._index}] extruder moved "
+                f"{e_distance_moved:.2f}mm overlimit, skip..."
+                # f"e_distance_moved: {e_distance_moved:.2f}\n"
+                # f"e_position: {e_position:.2f}\n"
+                # f"last_e_position: {self._last_e_position:.2f}\n"
+                # f"e_distance_moved_min: {self.e_distance_moved_min:.2f}\n"
+                # f"e_distance_moved_max: {self.e_distance_moved_max:.2f}\n"
+                # f"extruder speed: {e_speed}"
             )
             # Reset
             self._last_e_position = e_position
@@ -204,8 +201,8 @@ class Buffer:
         # Extrude: e_distance_moved > 0
         # Retract: e_distance_moved < 0
         self.log_info_s(
-            f"buffer[{self._index}] monitor extruder "
-            f"moved distance: {e_distance_moved:.2f} mm"
+            f"buffer[{self._index}] extruder "
+            f"moved: {e_distance_moved:.2f} mm"
         )
 
         # Update last extruder position
@@ -259,13 +256,18 @@ class Buffer:
             or old_volume == new_volume:
             return
 
+        # self.log_info_s(
+        #     "\n"
+        #     f"buffer[{self._index}] volume update:\n"
+        #     f"old: {old_volume:.2f}\n"
+        #     f"new: {new_volume:.2f}\n"
+        #     # f"set: {self._volume:.2f}\n"
+        #     f"pct: {self.get_volume_percentage():.2f}%"
+        # )
+        # Simplify
         self.log_info_s(
-            "\n"
-            f"buffer[{self._index}] volume update:\n"
-            f"old: {old_volume:.2f}\n"
-            f"new: {new_volume:.2f}\n"
-            # f"set: {self._volume:.2f}\n"
-            f"pct: {self.get_volume_percentage():.2f}%"
+            f"buffer[{self._index}] volume: "
+            f"{self.get_volume_percentage():.2f} %"
         )
 
         if new_volume == self.max_volume:
@@ -360,13 +362,15 @@ class Buffer:
         return distance, speed, speed
 
     def _log_move(self, m_type, slot_num, volume, distance, speed, accel):
-        self.log_info_s(
-            f"\nslot[{slot_num}] buffer[{self._index}] {m_type}:\n"
-            f"volume: {volume:.2f} mm^3\n"
-            f"distance: {distance:.2f} mm\n"
-            f"speed: {speed:.2f} mm/s\n"
-            f"accel: {accel:.2f} mm/s^2"
-        )
+        # self.log_info_s(
+        #     f"\nbuffer[{self._index}] slot[{slot_num}] {m_type}:\n"
+        #     f"volume: {volume:.2f} mm^3\n"
+        #     f"distance: {distance:.2f} mm\n"
+        #     f"speed: {speed:.2f} mm/s\n"
+        #     f"accel: {accel:.2f} mm/s^2"
+        # )
+        # Simplify
+        self.log_info_s(f"slot[{slot_num}] '{m_type}' {distance:.2f} mm")
 
     def _simple_move_abort(self, slot_num):
         if self.mms_endless_spool.is_inlet_released(slot_num):
@@ -379,20 +383,19 @@ class Buffer:
         return False
 
     def _simple_move(self, slot_num, distance, speed, accel):
-        mms_slot = self.mms.get_mms_slot(slot_num)
-
         # Inlet is triggered last move and now is released
         if self._simple_move_abort(slot_num):
             return
 
         # Update Inlet status
+        mms_slot = self.mms.get_mms_slot(slot_num)
         self._inlet_has_triggered = mms_slot.inlet.is_triggered()
-        # No select method
-        mms_drive = mms_slot.get_mms_drive()
-        mms_drive.update_focus_slot(slot_num)
-        mms_drive.manual_move(distance, speed, accel)
 
-        # Inlet is triggered before manual_move and now is released
+        # No select method
+        self.mms_delivery.mms_drive_move(
+            slot_num, distance, speed, accel, log=False)
+
+        # Inlet is triggered before moving and now is released
         self._simple_move_abort(slot_num)
 
     def _execute(self, m_type, volume, extrude_speed=None):
@@ -569,15 +572,15 @@ class Buffer:
         self._set_volume(self.min_volume)
 
         # if extruder_adapter.is_extruding():
-        #     self.log_warning("buffer volume is minimum but still"
-        #                      " extruding")
+        #     self.log_warning(
+        #         "buffer volume is minimum but still extruding")
         #     # Force feed
         # elif extruder_adapter.is_retracting():
-        #     self.log_warning("buffer volume is minimum but still"
-        #                      " retracting")
+        #     self.log_warning(
+        #         "buffer volume is minimum but still retracting")
         # else:
-        #     self.log_warning("buffer volume is minimum but not"
-        #                      " extruding/retracting")
+        #     self.log_warning(
+        #         "buffer volume is minimum but not extruding/retracting")
         #     # Force feed
 
     def _handle_half(self):
@@ -755,8 +758,7 @@ class BufferCommand:
             return
         if not mms_buffer.has_slot(slot_num):
             self.log_warning(
-                f"slot[{slot_num}] is not belong to target MMS Buffer"
-            )
+                f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
         if mms_buffer.stroke_is_measured():
@@ -783,8 +785,7 @@ class BufferCommand:
             return
         if not mms_buffer.has_slot(slot_num):
             self.log_warning(
-                f"slot[{slot_num}] is not belong to target MMS Buffer"
-            )
+                f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
         mms_buffer.fill(slot_num, speed, accel)
@@ -803,8 +804,7 @@ class BufferCommand:
             return
         if not mms_buffer.has_slot(slot_num):
             self.log_warning(
-                f"slot[{slot_num}] is not belong to target MMS Buffer"
-            )
+                f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
         mms_buffer.clear(slot_num, speed, accel)
@@ -823,8 +823,7 @@ class BufferCommand:
             return
         if not mms_buffer.has_slot(slot_num):
             self.log_warning(
-                f"slot[{slot_num}] is not belong to target MMS Buffer"
-            )
+                f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
         mms_buffer.halfway(slot_num, speed, accel)

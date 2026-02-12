@@ -212,6 +212,26 @@ class MMSDelivery:
         return True
 
     # ---- Core Operations ----
+    # -- Single stepper manual move --
+    def mms_selector_move(self, slot_num, distance, speed, accel):
+        mms_selector = self.mms.get_mms_slot(slot_num).get_mms_selector()
+        mms_selector.update_focus_slot(slot_num)
+        mms_selector.manual_move(distance, speed, accel)
+        self.log_info_s(
+            f"slot[{slot_num}] {mms_selector.get_mms_name()} "
+            f"move {distance:.2f} mm"
+        )
+
+    def mms_drive_move(self, slot_num, distance, speed, accel, log=True):
+        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
+        mms_drive.update_focus_slot(slot_num)
+        mms_drive.manual_move(distance, speed, accel)
+        if log:
+            self.log_info_s(
+                f"slot[{slot_num}] {mms_drive.get_mms_name()} "
+                f"move {distance:.2f} mm"
+            )
+
     # -- Select --
     def _led_effect_activate(self, slot_num_lst, led_reverse=False):
         for slot_num in slot_num_lst:
@@ -356,7 +376,7 @@ class MMSDelivery:
             raise DeliveryPreconditionError(
                 f"slot[{slot_num}] can not deliver", mms_slot)
 
-        msg = f"slot[{slot_num}] deliver distance={distance:.2f} mm"
+        msg = f"slot[{slot_num}] deliver {distance:.2f} mm"
 
         # Wait until mms_selector/mms_drive idle
         is_idle = self.wait_mms_selector_and_drive(slot_num)
@@ -399,7 +419,7 @@ class MMSDelivery:
             raise DeliveryPreconditionError(
                 f"slot[{slot_num}] can not deliver", mms_slot)
 
-        msg = f"slot[{slot_num}] drip deliver distance={distance:.2f} mm"
+        msg = f"slot[{slot_num}] drip deliver {distance:.2f} mm"
 
         # Wait until mms_selector/mms_drive idle
         is_idle = self.wait_mms_selector_and_drive(slot_num)
@@ -703,17 +723,14 @@ class MMSDelivery:
     def deliver_async_task(self, func, params=None):
         if self.async_task_sp.is_running():
             self.log_warning(
-                "Another deliver async_task is running, return...")
+                "another deliver async_task is running, return...")
             return
 
-        func = func
-        params = params or {}
         try:
-            is_ready = self.async_task_sp.setup(func, params)
-            if is_ready:
+            if self.async_task_sp.setup(func, params or {}):
                 self.async_task_sp.start()
         except Exception as e:
-            self.log_error(f"deliver async task error:{e}")
+            self.log_error(f"deliver async task error: {e}")
 
     @log_time_cost("log_info_s")
     def mms_load(self, slot_num):
@@ -1290,8 +1307,23 @@ class MMSDelivery:
         )
 
     def cmd_MMS_D_TEST(self, gcmd):
-        return
+        slot_num = 0
+        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
 
+        def _ppp():
+            while 1:
+                self.log_info(mms_drive.get_step())
+                self.pause(0.1)
+
+        async_task = AsyncTask()
+
+        try:
+            if async_task.setup(_ppp):
+                async_task.start()
+        except Exception as e:
+            self.log_error(f"async task error: {e}")
+
+        return
 
     # For KlipperScreen
     def cmd_MMS_SELECT_U(self, gcmd):
