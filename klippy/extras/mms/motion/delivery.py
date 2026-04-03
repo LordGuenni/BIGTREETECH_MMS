@@ -8,7 +8,10 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field, fields
 
+import mcu
+
 from ..adapters import (
+    extruder_adapter,
     gcode_adapter,
     printer_adapter,
     toolhead_adapter
@@ -38,28 +41,39 @@ class DeliveryConfig:
     wait_mms_stepper_interval: float = 0.2 # seconds
     wait_mms_stepper_timeout: float = 5 # seconds
 
-    # Select no SLOT
-    benchmark_distance: float  = 49 # mm
+    gentle_homing_distance: float = 50    # mm
+    gentle_homing_speed: float = 50      # mm/s
+    gentle_homing_accel: float = 150     # mm/s^2
+
+    walk_speed: float = 50 # mm/s
+    walk_accel: float = 150 # mm/s^2
+
+    sprint_speed: float = 50 # mm/s
+    sprint_accel: float = 150 # mm/s^2
 
 
 @dataclass(frozen=True)
 class PrinterDeliveryConfig(PrinterConfig):
     # Speed/Accel of Stepper:Selector
-    speed_selector: float = 100
-    accel_selector: float = 100
+    speed_selector: float = 150
+    accel_selector: float = 150
 
     # Speed/Accel of Stepper:Drive
-    speed_drive: float = 60
-    accel_drive: float = 10
+    speed_drive: float = 120
+    accel_drive: float = 50
 
     # The distance stepper move before endstop is triggered, in mm
-    stepper_move_distance: float = 1000
+    bowden_distance: float = 1000
 
     # The distance stepper retrace after unload to gate, in mm
     safety_retract_distance: float = 50
 
     # MMS_SLOTS_LOOP times
     slots_loop_times: int = 200
+
+    # The expire timeout for endstop homing
+    # Which overwrite global variable "TRSYNC_TIMEOUT" in mcu.py
+    custom_trsync_timeout: float = 0.05
 
 
 class MMSDelivery:
@@ -82,6 +96,12 @@ class MMSDelivery:
         self._initialize_mms()
         self._initialize_gcode()
         self._initialize_loggers()
+
+        # Overwrite global variable in mcu.py
+        try:
+            mcu.TRSYNC_TIMEOUT = self.pd_config.custom_trsync_timeout
+        except Exception as e:
+            self.log_error(f"MCU 'TRSYNC_TIMEOUT' overwrite failed: {e}")
 
     def _initialize_mms(self):
         self.mms = printer_adapter.get_mms()
@@ -108,19 +128,25 @@ class MMSDelivery:
             # Stop commands
             ("MMS_STOP", self.cmd_MMS_STOP),
             # Diagnostic commands
-            ("MMS_SLOTS_WALK", self.cmd_MMS_SLOTS_WALK),
             ("MMS_SLOTS_CHECK", self.cmd_MMS_SLOTS_CHECK),
             ("MMS_SLOTS_LOOP", self.cmd_MMS_SLOTS_LOOP),
+            # Calibration
+            ("MMS_BOWDEN_CALIBRATION", self.cmd_MMS_BOWDEN_CALIBRATION),
             # Command aliases
             ("MMS999", self.cmd_MMS_STOP),
             ("MMS9", self.cmd_MMS_SLOTS_CHECK),
             ("MMS8", self.cmd_MMS_SLOTS_LOOP),
+            ("MMS7", self.cmd_MMS_BOWDEN_CALIBRATION),
+            ("MMS_SLOTS_WALK", self.cmd_MMS_BOWDEN_CALIBRATION),
+
+            # Extruder sync
+            ("MMS_SLOT_EXTRUDER_SYNC", self.cmd_MMS_SLOT_EXTRUDER_SYNC),
+            ("MMS_SLOT_EXTRUDER_UNSYNC", self.cmd_MMS_SLOT_EXTRUDER_UNSYNC),
 
             # For KlipperScreen
             ("MMS_SELECT_U", self.cmd_MMS_SELECT_U),
             ("MMS_LOAD_U", self.cmd_MMS_LOAD_U),
             ("MMS_POP_U", self.cmd_MMS_POP_U),
-            ("MMS_PREPARE_U", self.cmd_MMS_PREPARE_U),
             # Test
             ("MMS_D_TEST", self.cmd_MMS_D_TEST),
             ("MMS_TEST_SELECTOR", self.cmd_MMS_TEST_SELECTOR),
@@ -137,7 +163,9 @@ class MMSDelivery:
         self.log_info = mms_logger.create_log_info(console_output=True)
         self.log_warning = mms_logger.create_log_warning(console_output=True)
         self.log_error = mms_logger.create_log_error(console_output=True)
+
         self.log_info_s = mms_logger.create_log_info(console_output=False)
+        self.log_warning_s = mms_logger.create_log_warning(console_output=False)
 
     # ---- Control ----
     def pause(self, period_seconds):
@@ -212,26 +240,6 @@ class MMSDelivery:
         return True
 
     # ---- Core Operations ----
-    # -- Single stepper manual move --
-    def mms_selector_move(self, slot_num, distance, speed, accel):
-        mms_selector = self.mms.get_mms_slot(slot_num).get_mms_selector()
-        mms_selector.update_focus_slot(slot_num)
-        mms_selector.manual_move(distance, speed, accel)
-        self.log_info_s(
-            f"slot[{slot_num}] {mms_selector.get_mms_name()} "
-            f"move {distance:.2f} mm"
-        )
-
-    def mms_drive_move(self, slot_num, distance, speed, accel, log=True):
-        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
-        mms_drive.update_focus_slot(slot_num)
-        mms_drive.manual_move(distance, speed, accel)
-        if log:
-            self.log_info_s(
-                f"slot[{slot_num}] {mms_drive.get_mms_name()} "
-                f"move {distance:.2f} mm"
-            )
-
     # -- Select --
     def _led_effect_activate(self, slot_num_lst, led_reverse=False):
         for slot_num in slot_num_lst:
@@ -247,13 +255,14 @@ class MMSDelivery:
             mms_slot = self.mms.get_mms_slot(slot_num)
             mms_slot.slot_led.deactivate_rainbow()
 
-    def _selector_refine_calibration(self, slot_num):
+    def _selector_refine_calibration(self, slot_num, factor=None):
         mms_slot = self.mms.get_mms_slot(slot_num)
         mms_selector = mms_slot.get_mms_selector()
 
         if mms_selector.can_calibrate():
             # Move static distance
-            dist = mms_slot.get_selector_calibrate_distance()
+            factor = 1 if factor is None else factor
+            dist = mms_slot.get_selector_calibrate_distance() * factor
             self.log_info_s(
                 f"selector refine calibration distance: {dist} mm")
             mms_selector.manual_move(
@@ -262,7 +271,7 @@ class MMSDelivery:
                 accel = self.pd_config.accel_selector,
             )
 
-    def _selector_deliver_to(self, slot_num):
+    def _selector_deliver_to(self, slot_num, reverse=False):
         mms_slot = self.mms.get_mms_slot(slot_num)
         mms_selector = mms_slot.get_mms_selector()
 
@@ -279,15 +288,15 @@ class MMSDelivery:
 
         with wait():
             return mms_selector.manual_home(
-                distance = self.pd_config.stepper_move_distance,
+                distance = self.pd_config.bowden_distance,
                 speed = self.pd_config.speed_selector,
                 accel = self.pd_config.accel_selector,
-                forward = True,
+                forward = not reverse,
                 trigger = True,
                 endstop_pair_lst = mms_slot.format_endstop_pair(pin_type),
             )
 
-    def select_slot(self, slot_num):
+    def select_slot(self, slot_num, reverse=False):
         mms_slot = self.mms.get_mms_slot(slot_num)
         mms_selector = mms_slot.get_mms_selector()
 
@@ -313,7 +322,7 @@ class MMSDelivery:
 
         for i in range(self.retry_times):
             self.log_info_s(msg)
-            result = self._selector_deliver_to(slot_num)
+            result = self._selector_deliver_to(slot_num, reverse)
 
             distance_moved += mms_selector.get_distance_moved()
             msg_dist = f"{msg} total distances moved:{distance_moved:.3f}"
@@ -345,14 +354,25 @@ class MMSDelivery:
             raise DeliveryFailedError(
                 f"{msg} failed after full movement", mms_slot)
 
-    # -- Deliver --
+    # -- Deliver params --
+    def _parse_distance(self, mms_slot, distance, pin_type, forward):
+        if distance is not None:
+            return distance, False
+
+        distance = mms_slot.get_deliver_distance(pin_type, forward)
+        if distance:
+            return distance, True
+
+        return self.pd_config.bowden_distance, False
+
     def _limit_drive_speed(self, speed):
         if speed is None:
             # Direct return
             return self.pd_config.speed_drive
 
         # Limit value
-        limited = min(max(speed, 0.0), self.pd_config.speed_drive)
+        # limited = min(max(speed, 0.0), self.pd_config.speed_drive)
+        limited = max(speed, 0.0)
         if limited != speed:
             self.log_warning(
                 f"speed {speed:.2f}mm/s limit to {limited:.2f}mm/s")
@@ -364,12 +384,14 @@ class MMSDelivery:
             return self.pd_config.accel_drive
 
         # Limit value
-        limited = min(max(accel, 0.0), self.pd_config.accel_drive)
+        # limited = min(max(accel, 0.0), self.pd_config.accel_drive)
+        limited = max(accel, 0.0)
         if limited != accel:
             self.log_warning(
                 f"accel {accel:.2f}mm/s^2 limit to {limited:.2f}mm/s^2")
         return limited
 
+    # -- Deliver --
     def _deliver_distance(self, slot_num, distance, speed=None, accel=None):
         mms_slot = self.mms.get_mms_slot(slot_num)
         if not self._can_deliver():
@@ -457,24 +479,16 @@ class MMSDelivery:
 
     # -- Deliver to --
     def _drive_deliver_to(
-        self, slot_num, pin_type, forward, trigger,
-        distance=None, speed=None, accel=None
+        self, slot_num, pin_type, forward, trigger, distance, speed, accel
     ):
         mms_slot = self.mms.get_mms_slot(slot_num)
         if not self._can_deliver():
             raise DeliveryPreconditionError(
                 f"slot[{slot_num}] can not deliver", mms_slot)
 
-        # Take care of 0
-        dist = distance if distance is not None \
-            else self.pd_config.stepper_move_distance
-        speed = self._limit_drive_speed(speed)
-        accel = self._limit_drive_accel(accel)
-
         mms_drive = mms_slot.get_mms_drive()
         mms_drive.update_focus_slot(slot_num)
         wait = mms_slot.get_wait_func(pin_type)
-        endstop_pair = mms_slot.format_endstop_pair(pin_type)
 
         with wait():
             # If deliver forward, enable monitoring
@@ -485,70 +499,201 @@ class MMSDelivery:
             )
             with context:
                 return mms_drive.manual_home(
-                    distance=dist, speed=speed, accel=accel,
+                    distance=distance, speed=speed, accel=accel,
                     forward=forward, trigger=trigger,
-                    endstop_pair_lst=endstop_pair,
+                    endstop_pair_lst=mms_slot.format_endstop_pair(pin_type),
                 )
 
     def _deliver_to(
         self, slot_num, pin_type, forward, trigger,
         distance=None, speed=None, accel=None
     ):
-        direction = "forward" if forward else "backward"
-        action = "trigger" if trigger else "release"
-        msg = (f"slot[{slot_num}] deliver {direction}"
-               f" until '{pin_type}' {action}")
+        mms_slot = self.mms.get_mms_slot(slot_num)
 
+        # Parse deliver parasms
+        distance, from_meta = self._parse_distance(
+            mms_slot, distance, pin_type, forward)
+        speed = self._limit_drive_speed(speed)
+        accel = self._limit_drive_accel(accel)
+
+        self.log_info_s(
+            f"\nslot[{slot_num}] deliver\n"
+            f"distance: {distance} mm\n"
+            f"speed: {speed} mm/s\n"
+            f"accel: {accel} mm/s^2"
+        )
+
+        # if from_meta:
+        #     return self.deliver_confidently(
+        #         slot_num, pin_type, forward, trigger,
+        #         distance, speed, accel
+        #     )
+        # else:
+        #     return self.deliver_with_retry(
+        #         slot_num, pin_type, forward, trigger,
+        #         distance, speed, accel
+        #     )
+        return self.deliver_with_retry(
+            slot_num, pin_type, forward, trigger,
+            distance, speed, accel
+        )
+
+    def deliver_confidently(
+        self, slot_num, pin_type, forward, trigger,
+        distance, speed, accel
+    ):
+        success, distance_moved = self.deliver_once(
+            slot_num, pin_type, forward, trigger, distance, speed, accel)
+        if success:
+            return True
+
+        # Homing is not terminated or completed
+        gentle_success = self._gentle_homing(
+            slot_num, pin_type, forward, trigger, distance_moved)
+        if gentle_success:
+            return True
+
+        # Finally not return
+        msg = self._format_deliver_msg(slot_num, pin_type, forward, trigger)
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        # Reset distance_moved to 0
+        # is_set = mms_slot.set_deliver_distance(pin_type, forward, distance=0)
+        # if is_set:
+        #     self.log_info_s(f"{msg} reset deliver distance to 0 mm")
+        # Raise error
+        raise DeliveryFailedError(
+            f"{msg} failed after full movement", mms_slot)
+
+    def _gentle_homing(
+        self, slot_num, pin_type, forward, trigger, distance_moved
+    ):
         mms_slot = self.mms.get_mms_slot(slot_num)
         mms_drive = mms_slot.get_mms_drive()
-        distance_moved = 0
+
+        result = self._drive_deliver_to(
+            slot_num, pin_type, forward, trigger,
+            self.d_config.gentle_homing_distance,
+            self.d_config.gentle_homing_speed,
+            self.d_config.gentle_homing_accel
+        )
+
+        new_dist = mms_drive.get_distance_moved()
+        if mms_drive.move_is_completed(result):
+            self.log_info_s(
+                f"slot[{slot_num}] gentle homing complete, "
+                f"gentle moved: {new_dist:.2f} mm"
+            )
+            # Save distance
+            distance_moved += new_dist
+            # is_set = mms_slot.set_deliver_distance(
+            #     pin_type, forward, distance_moved)
+            return True
+
+        # Not completed
+        self.log_info_s(
+            f"slot[{slot_num}] gentle homing failed after "
+            f"{new_dist:.2f} mm movement"
+        )
+        return False
+
+    def deliver_with_retry(
+        self, slot_num, pin_type, forward, trigger,
+        distance, speed, accel
+    ):
+        msg = self._format_deliver_msg(slot_num, pin_type, forward, trigger)
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        distance_moved_sum = 0
 
         for i in range(self.retry_times):
-            # Wait until mms_selector/mms_drive idle
-            is_idle = self.wait_mms_selector_and_drive(slot_num)
-            if not is_idle:
-                self.log_warning(
-                    f"{msg} wait selector or drive stepper idle timeout")
-            # Apply select
-            self.select_slot(slot_num)
+            success, distance_moved = self.deliver_once(
+                slot_num, pin_type, forward, trigger,
+                distance, speed, accel
+            )
+            distance_moved_sum += distance_moved
 
-            # Check destination
-            if mms_slot.check_pin(pin_type, trigger):
-                self.log_info_s(
-                    f"{msg} is already done, skip..."
-                    f"total moved: {distance_moved:.2f} mm"
-                )
-                self.mms.log_status()
-                return False
-
-            self.log_info_s(msg)
-            result = self._drive_deliver_to(
-                slot_num, pin_type, forward, trigger, distance, speed, accel)
-            distance_moved += mms_drive.get_distance_moved()
-
-            if mms_drive.move_is_terminated():
-                self.log_info_s(
-                    f"{msg} is terminated, "
-                    f"total moved: {distance_moved:.2f} mm"
-                )
-                # Exit retry loop
-                raise DeliveryTerminateSignal()
-
-            if mms_drive.move_is_completed(result):
-                self.log_info_s(
-                    f"{msg} is completed, "
-                    f"total moved: {distance_moved:.2f} mm"
-                )
-                # Exit retry loop
+            if success:
+                # Only update not 0
+                if distance_moved_sum:
+                    # Save distance
+                    is_set = mms_slot.set_deliver_distance(
+                        pin_type, forward, distance_moved_sum)
+                    if is_set:
+                        self.log_info_s(
+                            f"{msg} distance saved: "
+                            f"{distance_moved_sum:.2f} mm"
+                        )
                 return True
 
             # Retry
             self.pause(self.d_config.retry_period)
-            self.log_info(f"{msg} failed, retry {i+1}/{self.retry_times} ...")
+            self.log_info(
+                f"{msg} failed, retry {i+1}/{self.retry_times} ...")
 
+        # Failed after all retry
+        # Reset distance_moved to 0
+        # is_set = mms_slot.set_deliver_distance(pin_type, forward, distance=0)
+        # if is_set:
+        #     self.log_info_s(f"{msg} reset deliver distance to 0 mm")
         # Finally not return, raise exception
         raise DeliveryFailedError(
             f"{msg} failed after full movement", mms_slot)
+
+    def deliver_once(
+        self, slot_num, pin_type, forward, trigger,
+        distance, speed, accel
+    ):
+        # Prepare
+        msg = self._format_deliver_msg(slot_num, pin_type, forward, trigger)
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        mms_drive = mms_slot.get_mms_drive()
+
+        # Check destination pin state
+        if mms_slot.check_pin(pin_type, trigger):
+            self.log_info_s(f"{msg} is already done, skip...")
+            self.mms.log_status()
+            return True, 0
+
+        # Wait until mms_selector/mms_drive idle
+        if not self.wait_mms_selector_and_drive(slot_num):
+            self.log_warning(
+                f"{msg} wait selector/drive stepper idle timeout")
+            # return False, 0
+
+        # Apply select
+        self.select_slot(slot_num)
+        # Apply drive
+        self.log_info_s(msg)
+        result = self._drive_deliver_to(
+            slot_num, pin_type, forward, trigger, distance, speed, accel)
+
+        # Get distance moved
+        distance_moved = mms_drive.get_distance_moved()
+
+        # Check terminated
+        if mms_drive.move_is_terminated():
+            self.log_info_s(
+                f"{msg} is terminated, moved: {distance_moved:.2f} mm")
+            raise DeliveryTerminateSignal()
+
+        # Check complated
+        if mms_drive.move_is_completed(result):
+            self.log_info_s(
+                f"{msg} is completed, moved: {distance_moved:.2f} mm")
+            # Save distance
+            # is_set = mms_slot.set_deliver_distance(
+            #     pin_type, forward, distance_moved)
+            # if is_set:
+            #     self.log_info_s(
+            #         f"{msg} distance saved: {distance_moved:.2f} mm")
+            return True, distance_moved
+
+        return False, distance_moved
+
+    def _format_deliver_msg(self, slot_num, pin_type, forward, trigger):
+        # Format log message
+        f_dec = 'forward' if forward else 'backward'
+        t_dec = 'trigger' if trigger else 'release'
+        return f"slot[{slot_num}] deliver {f_dec} until '{pin_type}' {t_dec}"
 
     # ---- Atomic functions ----
     # Always use try-except with these functions
@@ -570,7 +715,8 @@ class MMSDelivery:
     ):
         self.log_info_s(f"slot[{slot_num}] load to release: '{pin_type}'")
         return self._deliver_to(
-            slot_num, pin_type, forward=True, trigger=False,
+            slot_num, pin_type,
+            forward=True, trigger=False,
             distance=distance, speed=speed, accel=accel
         )
 
@@ -580,7 +726,8 @@ class MMSDelivery:
     ):
         self.log_info_s(f"slot[{slot_num}] load to trigger: '{pin_type}'")
         return self._deliver_to(
-            slot_num, pin_type, forward=True, trigger=True,
+            slot_num, pin_type,
+            forward=True, trigger=True,
             distance=distance, speed=speed, accel=accel
         )
 
@@ -590,7 +737,8 @@ class MMSDelivery:
     ):
         self.log_info_s(f"slot[{slot_num}] unload to release: '{pin_type}'")
         return self._deliver_to(
-            slot_num, pin_type, forward=False, trigger=False,
+            slot_num, pin_type,
+            forward=False, trigger=False,
             distance=distance, speed=speed, accel=accel
         )
 
@@ -600,7 +748,8 @@ class MMSDelivery:
     ):
         self.log_info_s(f"slot[{slot_num}] unload to trigger: '{pin_type}'")
         return self._deliver_to(
-            slot_num, pin_type, forward=False, trigger=True,
+            slot_num, pin_type,
+            forward=False, trigger=True,
             distance=distance, speed=speed, accel=accel
         )
 
@@ -612,19 +761,37 @@ class MMSDelivery:
         self.log_warning(msg)
         raise DeliveryReadyError(msg, mms_slot)
 
+    def _safety_retract(self, slot_num):
+        self.move_backward(
+            slot_num,
+            self.pd_config.safety_retract_distance,
+            self.d_config.sprint_speed,
+            self.d_config.sprint_accel
+        )
+
     def load_to_gate(self, slot_num):
         self._check_slot_is_ready(slot_num)
         self._load_to_trigger(slot_num, self.pin_type.gate)
 
-    def load_to_outlet(self, slot_num, distance=None, speed=None, accel=None):
+    def load_to_outlet(
+        self, slot_num,
+        distance=None, speed=None, accel=None
+    ):
         self._check_slot_is_ready(slot_num)
         self._load_to_trigger(
-            slot_num, self.pin_type.outlet, distance, speed, accel
+            slot_num, self.pin_type.outlet,
+            distance, speed, accel
         )
 
-    def load_to_entry(self, slot_num):
+    def load_to_entry(
+        self, slot_num,
+        distance=None, speed=None, accel=None
+    ):
         self._check_slot_is_ready(slot_num)
-        self._load_to_trigger(slot_num, self.pin_type.entry)
+        self._load_to_trigger(
+            slot_num, self.pin_type.entry,
+            distance, speed, accel
+        )
 
     def load_until_buffer_runout_release(
         self, slot_num, distance=None, speed=None, accel=None
@@ -639,23 +806,23 @@ class MMSDelivery:
         self._check_slot_is_ready(slot_num)
         self._unload_to_release(slot_num, self.pin_type.outlet)
 
-    def unload_until_buffer_runout_trigger(
-        self, slot_num, distance=None, speed=None, accel=None
-    ):
+    def unload_until_buffer_runout_trigger(self, slot_num, distance=None):
         self._check_slot_is_ready(slot_num)
         self._unload_to_trigger(
-            slot_num, self.pin_type.buffer_runout, distance, speed, accel
+            slot_num,
+            self.pin_type.buffer_runout,
+            distance,
+            self.d_config.sprint_speed,
+            self.d_config.sprint_accel
         )
 
     def unload_to_gate(self, slot_num):
         self._check_slot_is_ready(slot_num)
         res = self._unload_to_release(slot_num, self.pin_type.gate)
-
         # Only unload safety distance
         # after unload homing move is not skipped
         if res:
-            self.move_backward(
-                slot_num, self.pd_config.safety_retract_distance)
+            self._safety_retract(slot_num)
 
     def unload_to_inlet(self, slot_num):
         self._check_slot_is_ready(slot_num)
@@ -672,6 +839,11 @@ class MMSDelivery:
                 self.log_info_s(f"slot[{slot_num}] is loading, unload skip...")
                 continue
             self.unload_to_gate(slot_num)
+
+    def unload_to_release_gate(self, slot_num, need_check=True):
+        if need_check:
+            self._check_slot_is_ready(slot_num)
+        self._unload_to_release(slot_num, self.pin_type.gate)
 
     def pop_slot(self, slot_num):
         self._check_slot_is_ready(slot_num)
@@ -691,35 +863,239 @@ class MMSDelivery:
                 self.select_slot(new_slot_num)
                 return
 
-    def pre_load_to_gate(self, slot_num):
-        # Pre-load don't need to check Inlet
-        self._load_to_trigger(slot_num, self.pin_type.gate)
+    def autoload_to_gate(self, slot_num):
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        mms_drive = mms_slot.get_mms_drive()
+        p_type = self.pin_type.gate
 
-    def unload_to_release_gate(self, slot_num, need_check=True):
-        if need_check:
-            self._check_slot_is_ready(slot_num)
-        self._unload_to_release(slot_num, self.pin_type.gate)
+        # Wait until mms_selector/mms_drive idle
+        if not self.wait_mms_selector_and_drive(slot_num):
+            msg = "wait mms selector/drive stepper idle timeout"
+            gcode_adapter.respond_error(msg)
+            self.log_warning(msg)
+            return
+
+        # Reverse select once
+        self.select_slot(slot_num, reverse=True)
+
+        distance = mms_slot.get_deliver_distance(p_type, True) \
+            or self.pd_config.bowden_distance
+        speed = self.d_config.sprint_speed
+        accel = self.d_config.sprint_accel
+
+        distance_moved_sum = 0
+        success = False
+        # Force autoload with retry
+        for i in range(self.retry_times):
+            self.log_info_s(
+                f"\nslot[{slot_num}] deliver\n"
+                f"distance: {distance} mm\n"
+                f"speed: {speed} mm/s\n"
+                f"accel: {accel} mm/s^2"
+            )
+            # Apply drive
+            result = self._drive_deliver_to(
+                slot_num, p_type,
+                forward=True, trigger=True,
+                distance=distance, speed=speed, accel=accel
+            )
+            distance_moved_sum += mms_drive.get_distance_moved()
+
+            # Check terminated
+            if mms_drive.move_is_terminated():
+                raise DeliveryTerminateSignal()
+            # Check complated
+            if mms_drive.move_is_completed(result):
+                success = True
+                break
+
+            # Retry
+            self.pause(self.d_config.retry_period)
+            self.log_info_s(
+                f"slot[{slot_num}] autoload failed, "
+                f"retry {i+1}/{self.retry_times} ..."
+            )
+
+        # Failed after all retry
+        if not success:
+            with mms_slot.update_deliver_distance():
+                # Reset distance_moved to 0
+                mms_slot.set_deliver_distance(
+                    p_type, forward=True, distance=0)
+
+            msg = f"slot[{slot_num}] autoload failed after full movement"
+            gcode_adapter.respond_error(msg)
+            self.log_warning_s(msg)
+            raise DeliveryFailedError(msg, mms_slot)
+
+        # Only update not 0
+        if distance_moved_sum:
+            with mms_slot.update_deliver_distance():
+                # Save distance
+                is_set = mms_slot.set_deliver_distance(
+                    p_type, forward=True, distance=distance_moved_sum)
+                if is_set:
+                    self.log_info_s(
+                        f"slot[{slot_num}] autoload distance saved: "
+                        f"{distance_moved_sum:.2f} mm"
+                    )
+
+        # Deliver backward without re-select
+        safe_dist = -abs(self.pd_config.safety_retract_distance)
+        mms_drive.manual_move(
+            safe_dist,
+            self.d_config.sprint_speed,
+            self.d_config.sprint_accel
+        )
+        self.log_info_s(
+            f"slot[{slot_num}] deliver {safe_dist:.2f} mm finish")
+
+        # Re-calibrate backward with twice factor
+        self._selector_refine_calibration(slot_num, factor=-2)
+        if mms_slot.selector.is_triggered():
+            mms_selector = mms_slot.get_mms_selector()
+            mms_selector.update_focus_slot(slot_num)
+
+    def preload_to_gate(self, slot_num):
+        # Pre-load don't need to check Inlet
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        p_type = self.pin_type.gate
+
+        # Reverse select
+        self.select_slot(slot_num, reverse=True)
+
+        # Use default distance to prevent using slot meta
+        self._load_to_trigger(
+            slot_num, p_type,
+            # distance=mms_slot.get_deliver_distance(p_type, True),
+            speed=self.d_config.sprint_speed,
+            accel=self.d_config.sprint_accel
+        )
+        # Deliver backward without re-select
+        safe_dist = -abs(self.pd_config.safety_retract_distance)
+        mms_drive = mms_slot.get_mms_drive()
+        mms_drive.manual_move(
+            safe_dist,
+            self.d_config.sprint_speed,
+            self.d_config.sprint_accel
+        )
+        self.log_info_s(
+            f"slot[{slot_num}] deliver {safe_dist:.2f} mm finish")
+
+        # Re-calibrate backward with twice factor
+        self._selector_refine_calibration(slot_num, factor=-2)
+        if mms_slot.selector.is_triggered():
+            mms_selector = mms_slot.get_mms_selector()
+            mms_selector.update_focus_slot(slot_num)
 
     def unselect(self):
-        distance = self.d_config.benchmark_distance
-        slot_nums = self.mms.get_min_slot_nums()
-
-        for slot_num in slot_nums:
-            self.log_info_s(f"slot[{slot_num}] unselect...")
+        for slot_num in self.mms.get_selecting_slots():
+            self.log_info_s(f"slot[{slot_num}] unselect begin")
             mms_slot = self.mms.get_mms_slot(slot_num)
             mms_selector = mms_slot.get_mms_selector()
 
-            self.select_slot(slot_num)
             mms_selector.manual_move(
-                distance=distance,
-                speed=self.pd_config.speed_selector,
-                accel=self.pd_config.accel_selector
+                distance=mms_selector.get_unselect_distance(),
+                speed=self.d_config.sprint_speed,
+                accel=self.d_config.sprint_accel
             )
+            if mms_slot.selector.is_released():
+                mms_selector.update_focus_slot(None)
             self.log_info_s(f"slot[{slot_num}] unselect finished")
-            # if mms_slot.selector.is_released():
-            mms_selector.update_focus_slot(None)
+
+    # ---- MMS Buffer support ----
+    def fill_buffer(self, slot_num, distance=None):
+        self._check_slot_is_ready(slot_num)
+
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        distance = distance or self.pd_config.bowden_distance
+
+        self._load_to_trigger(
+            slot_num, self.pin_type.outlet,
+            distance = distance,
+            speed = self.d_config.sprint_speed,
+            accel = self.d_config.sprint_accel
+        )
+
+    def clear_buffer(self, slot_num, distance=None):
+        self._check_slot_is_ready(slot_num)
+
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        distance = distance or self.pd_config.bowden_distance
+
+        self._unload_to_trigger(
+            slot_num, self.pin_type.buffer_runout,
+            distance = distance,
+            speed = self.d_config.sprint_speed,
+            accel = self.d_config.sprint_accel
+        )
+
+    def halfway_buffer(self, slot_num, spring_stroke):
+        self._check_slot_is_ready(slot_num)
+
+        p_type = self.pin_type.buffer_runout
+        distance = self.pd_config.bowden_distance
+        spd = self.d_config.sprint_speed
+        acc = self.d_config.sprint_accel
+
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        # First let buffer_runout trigger
+        self._unload_to_trigger(slot_num, p_type, distance, spd, acc)
+        # Secondary let buffer_runout release
+        self._load_to_release(slot_num, p_type, distance, spd, acc )
+
+        # Move forward half of spring stroke
+        self.move_forward(slot_num, abs(spring_stroke)*0.5, spd, acc)
+        return True
+
+    def measure_buffer(self, slot_num, distance, speed, accel):
+        self._check_slot_is_ready(slot_num)
+
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        self.load_to_outlet(slot_num)
+        self._unload_to_trigger(
+            slot_num, self.pin_type.buffer_runout,
+            distance, speed, accel
+        )
+
+        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
+        distance_moved = round(abs(mms_drive.get_distance_moved()), 4)
+        return distance_moved
 
     # ---- Deliver commands ----
+    # -- Single stepper manual move --
+    def mms_selector_move(self, slot_num, distance, speed, accel):
+        mms_selector = self.mms.get_mms_slot(slot_num).get_mms_selector()
+        mms_selector.update_focus_slot(slot_num)
+        mms_selector.manual_move(distance, speed, accel)
+        self.log_info_s(
+            f"slot[{slot_num}] {mms_selector.get_mms_name()} "
+            f"move {distance:.2f} mm"
+        )
+
+    def mms_drive_move(self, slot_num, distance, speed, accel, log=True):
+        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
+        mms_drive.update_focus_slot(slot_num)
+        mms_drive.manual_move(distance, speed, accel)
+        if log:
+            self.log_info_s(
+                f"slot[{slot_num}] {mms_drive.get_mms_name()} "
+                f"move {distance:.2f} mm"
+            )
+
+    def mms_drive_sprint(self, slot_num, distance):
+        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
+        mms_drive.update_focus_slot(slot_num)
+        mms_drive.manual_move(
+            distance,
+            self.d_config.sprint_speed,
+            self.d_config.sprint_accel
+        )
+        self.log_info_s(
+            f"slot[{slot_num}] {mms_drive.get_mms_name()} "
+            f"sprint {distance:.2f} mm"
+        )
+
     def deliver_async_task(self, func, params=None):
         if self.async_task_sp.is_running():
             self.log_warning(
@@ -797,10 +1173,13 @@ class MMSDelivery:
         try:
             # Skip wanted slot
             self.unload_loading_slots(skip_slot=slot_num)
+
+            mms_slot = self.mms.get_mms_slot(slot_num)
             # Load wanted slot to gate triggered
             self.load_to_gate(slot_num)
             # Unload wanted slot to gate released
             self.unload_to_gate(slot_num)
+
         except DeliveryTerminateSignal:
             self.log_info_s(f"slot[{slot_num}] prepare terminated")
             return False
@@ -812,10 +1191,10 @@ class MMSDelivery:
 
     @log_time_cost("log_info_s")
     def mms_move(self, slot_num, distance, speed=None, accel=None):
-        if abs(distance) > self.pd_config.stepper_move_distance:
+        if abs(distance) > self.pd_config.bowden_distance:
             self.log_warning(
                 f"slot[{slot_num}] can not move {distance}mm, "
-                "check config'stepper_move_distance'")
+                "check config 'bowden_distance'")
             return False
 
         try:
@@ -833,10 +1212,10 @@ class MMSDelivery:
 
     @log_time_cost("log_info_s")
     def mms_drip_move(self, slot_num, distance, speed=None, accel=None):
-        if abs(distance) > self.pd_config.stepper_move_distance:
+        if abs(distance) > self.pd_config.bowden_distance:
             self.log_warning(
                 f"slot[{slot_num}] can not drip move {distance}mm, "
-                "check config'stepper_move_distance'")
+                "check config 'bowden_distance'")
             return False
 
         try:
@@ -903,6 +1282,77 @@ class MMSDelivery:
 
         return True
 
+    def mms_bowden_calibration(self):
+        if not self._can_walk():
+            return False
+
+        spd = self.d_config.walk_speed
+        acc = self.d_config.walk_accel
+
+        self.log_info("mms bowden calibration begin")
+        for slot_num in self.mms.get_slot_nums():
+            try:
+                self._check_slot_is_ready(slot_num)
+
+                mms_slot = self.mms.get_mms_slot(slot_num)
+                mms_drive = mms_slot.get_mms_drive()
+
+                # Prepare before
+                self.unload_loading_slots()
+                self.load_to_gate(slot_num)
+                self.unload_to_gate(slot_num)
+
+                # Start
+                if mms_slot.entry_is_set():
+                    first_p = self.pin_type.entry
+                else:
+                    first_p = self.pin_type.outlet
+
+                with mms_slot.update_deliver_distance():
+                    mms_slot.truncate_deliver_distance()
+
+                    # Pin: Entry/Outlet Forward
+                    # Not necessary to add safety_retract_distance,
+                    # cause unload_to_gate() in prepare phase
+                    # has actually played
+                    self._load_to_trigger(
+                        slot_num, first_p, speed=spd, accel=acc)
+
+                    # Pin: Gate Backward
+                    self._unload_to_release(
+                        slot_num, self.pin_type.gate, speed=spd, accel=acc)
+
+                    self._safety_retract(slot_num)
+
+                    # # Pin: Inlet Backward
+                    # self._unload_to_release(
+                    #     slot_num, self.pin_type.inlet,
+                    #     speed=spd, accel=acc
+                    # )
+                    # # Pin: Inlet Forward
+                    # mms_slot.set_deliver_distance(
+                    #     self.pin_type.gate,
+                    #     forward=True,
+                    #     distance=abs(mms_drive.get_distance_moved())
+                    # )
+
+                    # Finally write to file
+                    mms_slot.meta.write_file()
+
+            except DeliveryReadyError:
+                # Keep on next SLOT
+                pass
+            except DeliveryTerminateSignal:
+                self.log_info("mms bowden calibration terminated")
+                return False
+            except Exception as e:
+                self.log_error(f"mms bowden calibration error: {e}")
+                return False
+
+        self.unselect()
+        self.log_info("mms bowden calibration finish")
+        return True
+
     def verify_pins(self, mms_slot, loaded):
         trigger = loaded
         if not mms_slot.inlet.is_triggered():
@@ -920,48 +1370,6 @@ class MMSDelivery:
         if rfid.enable and rfid.mms_rfid.is_detecting:
             rfid.mms_rfid.detect_end()
             raise Exception("RFID")
-
-    def mms_slots_walk(self):
-        self.log_info("slots walk begin")
-        # Walk through all SLOTs
-        for slot_num in self.mms.get_slot_nums():
-            if not self._can_walk():
-                return False
-
-            try:
-                self.unload_loading_slots(skip_slot=slot_num)
-                self.pause(1)
-
-                mms_slot = self.mms.get_mms_slot(slot_num)
-                if mms_slot.entry_is_set():
-                    self.load_to_entry(slot_num)
-                else:
-                    self.load_to_outlet(slot_num)
-
-            except DeliveryTerminateSignal:
-                self.log_info("slots walk terminated")
-                return False
-            except DeliveryReadyError:
-                pass
-            except Exception as e:
-                self.log_error(f"slots walk error:{e}")
-                return False
-
-        # Finally unload
-        if self._can_walk():
-            try:
-                self.unload_loading_slots()
-            except DeliveryTerminateSignal:
-                self.log_info("slots walk terminated")
-                return False
-            except DeliveryReadyError:
-                pass
-            except Exception as e:
-                self.log_error(f"slots walk error:{e}")
-                return False
-
-        self.log_info("slots walk finish")
-        return True
 
     def mms_slots_check(self):
         self.log_info("slots check begin")
@@ -1127,16 +1535,14 @@ class MMSDelivery:
             self.mms_prepare(slot_num)
         else:
             self.deliver_async_task(
-                self.mms_prepare,
-                {"slot_num":slot_num}
-            )
+                self.mms_prepare, {"slot_num":slot_num})
 
     def cmd_MMS_MOVE(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)
         if not self.mms.slot_is_available(slot_num):
             return
 
-        valid_distance = abs(self.pd_config.stepper_move_distance)
+        valid_distance = abs(self.pd_config.bowden_distance)
         valid_speed = abs(self.pd_config.speed_drive)
         valid_accel = abs(self.pd_config.accel_drive)
 
@@ -1178,7 +1584,7 @@ class MMSDelivery:
         if not self.mms.slot_is_available(slot_num):
             return
 
-        valid_distance = abs(self.pd_config.stepper_move_distance)
+        valid_distance = abs(self.pd_config.bowden_distance)
         distance = gcmd.get_float(
             "DISTANCE",
             default=0.0, minval=-valid_distance, maxval=valid_distance
@@ -1221,16 +1627,16 @@ class MMSDelivery:
         else:
             self.deliver_async_task(self.mms_unselect)
 
-    def cmd_MMS_SLOTS_WALK(self, gcmd=None):
+    def cmd_MMS_BOWDEN_CALIBRATION(self, gcmd=None):
         if not self.mms.cmd_can_exec():
-            self.log_warning("MMS_SLOTS_WALK can not execute now")
+            self.log_warning("MMS_BOWDEN_CALIBRATION can not execute now")
             return
 
         should_wait = gcmd.get_int("WAIT", default=0)
         if bool(should_wait):
-            self.mms_slots_walk()
+            self.mms_bowden_calibration()
         else:
-            self.deliver_async_task(self.mms_slots_walk)
+            self.deliver_async_task(self.mms_bowden_calibration)
 
     def cmd_MMS_SLOTS_CHECK(self, gcmd=None):
         if not self.mms.cmd_can_exec():
@@ -1306,23 +1712,25 @@ class MMSDelivery:
             f"interval is {result:.2f} mm"
         )
 
+    def cmd_MMS_SLOT_EXTRUDER_SYNC(self, gcmd):
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.mms.slot_is_available(slot_num):
+            return
+
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        mms_drive = mms_slot.get_mms_drive()
+        mms_drive.sync_to_extruder()
+
+    def cmd_MMS_SLOT_EXTRUDER_UNSYNC(self, gcmd):
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.mms.slot_is_available(slot_num):
+            return
+
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        mms_drive = mms_slot.get_mms_drive()
+        mms_drive.unsync_to_extruder()
+
     def cmd_MMS_D_TEST(self, gcmd):
-        slot_num = 0
-        mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
-
-        def _ppp():
-            while 1:
-                self.log_info(mms_drive.get_step())
-                self.pause(0.1)
-
-        async_task = AsyncTask()
-
-        try:
-            if async_task.setup(_ppp):
-                async_task.start()
-        except Exception as e:
-            self.log_error(f"async task error: {e}")
-
         return
 
     # For KlipperScreen
@@ -1355,16 +1763,6 @@ class MMSDelivery:
                 f"slot[{slot_num}] MMS_POP_U can not execute now")
             return
         self.deliver_async_task(self.mms_pop, {"slot_num":slot_num})
-
-    def cmd_MMS_PREPARE_U(self, gcmd):
-        slot_num = gcmd.get_int("SLOT", minval=0)
-        if not self.mms.slot_is_available(slot_num):
-            return
-        if not self.mms.cmd_can_exec():
-            self.log_warning(
-                f"slot[{slot_num}] MMS_PREPARE_U can not execute now")
-            return
-        self.deliver_async_task(self.mms_prepare, {"slot_num":slot_num})
 
 
 def load_config(config):

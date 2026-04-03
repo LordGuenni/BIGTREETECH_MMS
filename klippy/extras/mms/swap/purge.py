@@ -133,6 +133,8 @@ class MMSPurge:
     def _initialize_gcode(self):
         commands = [
             ("MMS_PURGE", self.cmd_MMS_PURGE),
+            ("MMS_PURGE_TEST", self.cmd_MMS_PURGE_TEST),
+
             ("MMS_TRAY", self.cmd_MMS_TRAY),
             ("MMS_TRAY_EJECT", self.cmd_MMS_TRAY_EJECT),
         ]
@@ -472,12 +474,16 @@ class MMSPurge:
             return False
 
         if self.is_running():
-            self.log_warning("another purge is running, return")
+            msg = "another mms purge is running, skip"
+            gcode_adapter.respond_error(msg)
+            self.log_warning(msg)
             return False
 
         # Check toolhead
         if not toolhead_adapter.is_homed():
-            self.log_warning("toolhead is not homed, return")
+            msg = "toolhead is not homed, mms purge skip"
+            gcode_adapter.respond_error(msg)
+            self.log_warning(msg)
             return False
 
         # Check extruder
@@ -540,7 +546,7 @@ class MMSPurge:
             )
             gcode_adapter.run_command(macro)
 
-    def mms_purge(self):
+    def mms_purge_async(self):
         self._exec_custom_macro(self.custom_before, "before")
 
         slot_num = self.mms.get_current_slot()
@@ -568,12 +574,182 @@ class MMSPurge:
         self._exec_custom_macro(self.custom_after, "after")
         return True
 
+    def mms_purge(self):
+        self._exec_custom_macro(self.custom_before, "before")
+
+        slot_num = self.mms.get_current_slot()
+        if not self._safety_checks(slot_num):
+            return False
+
+        log_prefix = f"slot[{slot_num}] mms purge"
+        self.log_info_s(f"{log_prefix} begin")
+
+        try:
+            with self._purge_is_running():
+                mms_slot = self.mms.get_mms_slot(slot_num)
+                mms_drive = mms_slot.get_mms_drive()
+
+                # Make sure mms_buffer is idle
+                self._pause_mms_buffer(slot_num)
+
+                if self.is_enabled():
+                    # Move to tray point
+                    self.move_to_tray()
+                    # Make sure buffer sprint is relaxed
+                    self.mms_delivery.clear_buffer(slot_num)
+
+                    # Sync to extrude
+                    with mms_drive.sync_with_extruder():
+                        extruder_adapter.extrude(
+                            self.get_purge_distance(),
+                            self.get_purge_speed()
+                        )
+
+                    # Wait a while to solidify filament
+                    with toolhead_adapter.fan_cooldown(
+                            speed = self.fan_cooldown_speed,
+                            wait = self.fan_cooldown_wait
+                        ):
+                        # Retraction compensation
+                        distance = abs(self.retraction_compensation)
+                        with mms_drive.sync_with_extruder():
+                            extruder_adapter.retract(
+                                distance, self.retract_speed)
+                        self.log_info_s(
+                            f"slot[{slot_num}] apply retraction compensation,"
+                            f" distance: {distance} mm"
+                        )
+
+                    # Try tray_eject
+                    self.tray_eject()
+
+                else:
+                    self.log_info_s(f"slot[{slot_num}] apply nozzle priming")
+
+                    # Make sure buffer sprint is relaxed
+                    self.mms_delivery.clear_buffer(slot_num)
+
+                    distance = abs(self.nozzle_priming_dist)
+                    with mms_drive.sync_with_extruder():
+                        extruder_adapter.extrude(
+                            distance, self.nozzle_priming_speed)
+
+                    self.log_info_s(
+                        f"slot[{slot_num}] extrude distance: {distance} mm")
+
+            msg = f"{log_prefix} finish"
+            gcode_adapter.respond_echo(msg)
+            self.log_info_s(msg)
+
+            self._exec_custom_macro(self.custom_after, "after")
+            return True
+
+        except PurgeFailedError as e:
+            self.log_warning(f"{log_prefix} failed: {e}")
+            gcode_adapter.respond_error("mms purge failed")
+            return False
+        except Exception as e:
+            self.log_error(f"{log_prefix} error: {e}")
+            gcode_adapter.respond_error("mms purge failed")
+            return False
+
+    def mms_purge_lazy(self):
+        self._exec_custom_macro(self.custom_before, "before")
+
+        slot_num = self.mms.get_current_slot()
+        if not self._safety_checks(slot_num):
+            return False
+
+        log_prefix = f"slot[{slot_num}] mms purge lazy"
+        self.log_info_s(f"{log_prefix} begin")
+
+        try:
+            with self._purge_is_running():
+                mms_slot = self.mms.get_mms_slot(slot_num)
+                mms_drive = mms_slot.get_mms_drive()
+
+                # Make sure mms_buffer is idle
+                mms_buffer = self._pause_mms_buffer(slot_num)
+
+                if self.is_enabled():
+                    # Move to tray point
+                    self.move_to_tray()
+
+                    distance = self.get_purge_distance()
+                    e_spd = self.get_purge_speed()
+                    speed = extruder_adapter.transform_speed(e_spd) * 0.5
+                    accel = 150
+
+                    mms_buffer.clear(slot_num)
+
+                    # mms_buffer.async_sprint_fill(slot_num, speed)
+                    # extruder_adapter.extrude(distance, e_spd)
+                    extruder_adapter.extrude(distance, e_spd, wait=False)
+
+                    distance = distance / 1.5
+                    self.log_info_s(
+                        f"\nslot[{slot_num}] deliver\n"
+                        f"distance: {distance} mm\n"
+                        f"speed: {speed} mm/s\n"
+                        f"accel: {accel} mm/s^2"
+                    )
+                    mms_drive.manual_move(distance, speed, accel)
+
+                    # for i
+                    # distance/mms_buffer.get_spring_stroke
+                    # if buffer_runout is release
+                    # pause
+
+                    # Wait a while to solidify filament
+                    with toolhead_adapter.fan_cooldown(
+                            speed = self.fan_cooldown_speed,
+                            wait = self.fan_cooldown_wait
+                        ):
+                        self.mms_delivery.clear_buffer(slot_num)
+
+                        # Retraction compensation
+                        distance = abs(self.retraction_compensation)
+                        with mms_drive.sync_with_extruder():
+                            extruder_adapter.retract(
+                                distance, self.retract_speed)
+
+                        self.log_info_s(
+                            f"slot[{slot_num}] apply retraction compensation,"
+                            f" distance: {distance} mm"
+                        )
+
+                    # Try tray_eject
+                    self.tray_eject()
+
+            msg = f"{log_prefix} finish"
+            gcode_adapter.respond_echo(msg)
+            self.log_info_s(msg)
+
+            self._exec_custom_macro(self.custom_after, "after")
+            return True
+
+        except PurgeFailedError as e:
+            self.log_warning(f"{log_prefix} failed: {e}")
+            gcode_adapter.respond_error("mms purge failed")
+            return False
+        except Exception as e:
+            self.log_error(f"{log_prefix} error: {e}")
+            gcode_adapter.respond_error("mms purge failed")
+            return False
+
     # ---- GCode ----
     @log_time_cost("log_info_s")
     def cmd_MMS_PURGE(self, gcmd):
         with toolhead_adapter.snapshot():
             with toolhead_adapter.safe_z_raise(self.z_raise):
-                self.mms_purge()
+                # self.mms_purge()
+                self.mms_purge_async()
+
+    @log_time_cost("log_info_s")
+    def cmd_MMS_PURGE_TEST(self, gcmd):
+        with toolhead_adapter.snapshot():
+            with toolhead_adapter.safe_z_raise(self.z_raise):
+                self.mms_purge_lazy()
 
     def cmd_MMS_TRAY(self, gcmd=None):
         with toolhead_adapter.safe_z_raise(self.z_raise):

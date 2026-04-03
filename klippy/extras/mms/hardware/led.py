@@ -50,6 +50,8 @@
 import copy, json, re
 from dataclasses import dataclass
 
+from ... import neopixel
+
 from .led_effect import (
     MMSLedEffect,
     EffectMarquee,
@@ -63,6 +65,7 @@ from ..adapters import (
     neopixel_dispatch,
     printer_adapter,
 )
+from ..core.config import PrinterConfig
 
 
 # Utils
@@ -73,7 +76,8 @@ def is_valid_color_code(color_code):
     """
     pattern = "^[0-9A-Fa-f]{6}$"
     # Match the color code against the regular expression
-    return True if re.match(pattern, color_code) else False
+    # return True if re.match(pattern, color_code) else False
+    return bool(re.match(pattern, color_code))
 
 
 def color_code_to_rgbw(color_code):
@@ -433,10 +437,24 @@ class LEDManager:
         }
 
 
+@dataclass(frozen=True)
+class PrinterLedConfig(PrinterConfig):
+    # The custom BIT_MAX_TIME for neopixel
+    # Which overwrite global variable "BIT_MAX_TIME" in neopixel.py
+    custom_bit_max_time: float = 0.000030
+
+
 class MMSLed:
     def __init__(self, config):
         self.reactor = printer_adapter.get_reactor()
         self.mms_led_cfg = MMSLedConfig()
+
+        # Overwrite global variable in neopixel.py
+        p_led_config = PrinterLedConfig(config)
+        try:
+            neopixel.BIT_MAX_TIME = p_led_config.custom_bit_max_time
+        except Exception as e:
+            pass
 
         printer_adapter.register_klippy_connect(
             self._handle_klippy_connect)

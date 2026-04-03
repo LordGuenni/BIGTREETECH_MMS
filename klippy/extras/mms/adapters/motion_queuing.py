@@ -43,6 +43,9 @@ class MotionQueuingAdapter(BaseAdapter):
         return self._get_motion_queuing().\
             drip_update_time(start_time, end_time, drip_completion)
 
+    def check_step_generation_scan_windows(self):
+        return self._get_motion_queuing().check_step_generation_scan_windows()
+
     # ---- Advanced trapq control ----
     def setup_trapq(self, trapq, print_time, distance, speed, accel):
         """Configure trap queue with movement parameters"""

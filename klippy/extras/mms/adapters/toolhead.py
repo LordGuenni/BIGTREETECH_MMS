@@ -102,6 +102,9 @@ class ToolheadAdapter(BaseAdapter):
                 f"extruder[{e_name}] finish heat to temp:{temp}"
             )
 
+    def flush_step_generation(self):
+        return self._get_toolhead().flush_step_generation()
+
     # ---- Fan ----
     @contextmanager
     def fan_cooldown(self, speed, wait):

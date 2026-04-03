@@ -273,7 +273,7 @@ class MMSSwap:
                      f" standard swap"
 
         self.log_info_s(f"{log_prefix} begin")
-        self._swap_park()
+        # self._swap_park()
 
         # Phase I: Eject
         if not self.mms_eject.mms_eject():
@@ -285,14 +285,13 @@ class MMSSwap:
             raise SwapFailedSignal(f"slot[{slot_num_to}] charge failed")
 
         # Phase III: Purge
-        if not self.mms_purge.mms_purge():
+        # if not self.mms_purge.mms_purge():
+        if not self.mms_purge.mms_purge_async():
             raise SwapFailedSignal(f"slot[{slot_num_to}] purge failed")
 
-        # Phase IV: Halfway buffer for volume initilized
+        # Phase IV: Measure buffer if is not measured
         mms_buffer = self.mms.get_mms_slot(slot_num_to).get_mms_buffer()
-        if not mms_buffer.halfway(slot_num_to):
-            raise SwapFailedSignal(
-                f"slot[{slot_num_to}] halfway mms_buffer failed")
+        mms_buffer.measure_stroke(slot_num_to)
 
         # Phase V: Brush
         if not self.mms_brush.mms_brush():
@@ -304,7 +303,7 @@ class MMSSwap:
         log_prefix = f"slot[{slot_num}] shortcut swap"
 
         self.log_info_s(f"{log_prefix} begin")
-        self._swap_park()
+        # self._swap_park()
 
         self._swap_no_blocking(skip_slot_num=slot_num)
         # Phase I: Charge
@@ -312,14 +311,13 @@ class MMSSwap:
             raise SwapFailedSignal(f"{log_prefix} charge failed")
 
         # Phase II: Purge
-        if not self.mms_purge.mms_purge():
+        # if not self.mms_purge.mms_purge():
+        if not self.mms_purge.mms_purge_async():
             raise SwapFailedSignal(f"{log_prefix} purge failed")
 
-        # Phase III: Halfway buffer for volume initilized
+        # Phase III: Measure buffer if is not measured
         mms_buffer = self.mms.get_mms_slot(slot_num).get_mms_buffer()
-        if not mms_buffer.halfway(slot_num):
-            raise SwapFailedSignal(
-                f"slot[{slot_num}] halfway mms_buffer failed")
+        mms_buffer.measure_stroke(slot_num)
 
         # Phase IV: Brush
         if not self.mms_brush.mms_brush():

@@ -1,6 +1,6 @@
 # Support for MMS Eject
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -17,6 +17,14 @@ from ..core.config import OptionalField, PrinterConfig
 from ..core.exceptions import EjectFailedError
 from ..core.logger import log_time_cost
 from ..core.task import AsyncTask
+
+
+@dataclass(frozen=True)
+class EjectConfig:
+    # Extrude distance to fill space
+    # from entry/outlet triggered to nozzle
+    empty_retract_distance = 120  # mm
+    empty_retract_speed = 600    # mm/min
 
 
 @dataclass(frozen=True)
@@ -95,6 +103,7 @@ class MMSEject:
     def _initialize_gcode(self):
         commands = [
             ("MMS_EJECT", self.cmd_MMS_EJECT),
+            ("MMS_EJECT_UNSELECT", self.cmd_MMS_EJECT_UNSELECT),
         ]
         gcode_adapter.bulk_register(commands)
 
@@ -237,11 +246,11 @@ class MMSEject:
         return mms_buffer
 
     # ---- Eject ----
-    def _prepare_only(self, slot_num):
+    def _unload_only(self, slot_num):
         log_prefix = f"slot[{slot_num}] eject with entry is released"
         self.log_info_s(f"{log_prefix} begin")
 
-        result = self.mms_delivery.mms_prepare(slot_num)
+        result = self.mms_delivery.mms_unload(slot_num)
         if result:
             self.log_info_s(f"{log_prefix} finish")
         else:
@@ -296,10 +305,9 @@ class MMSEject:
                 self._pause_mms_buffer(slot_num)
 
             if check_entry and self._entry_is_released(eject_slots[0]):
-                # Only mms_prepare need, apply and return
+                # Only unload need, apply and return
                 for slot_num in eject_slots:
-                    self.log_info_s(f"slot[{slot_num}] eject with prepare only")
-                    self._prepare_only(slot_num)
+                    self._unload_only(slot_num)
 
             # Check again and continue if any slots still loading
             eject_slots = self.find_eject_slots()
@@ -381,7 +389,7 @@ class MMSEject:
             )
             gcode_adapter.run_command(macro)
 
-    def mms_eject(self, check_entry=True):
+    def mms_eject_async(self, check_entry=True):
         self._exec_custom_macro(self.custom_before, "before")
 
         if self.is_running():
@@ -401,13 +409,134 @@ class MMSEject:
         self._exec_custom_macro(self.custom_after, "after")
         return True
 
-    # ---- GCode ----
+    def _standard_eject_sync(self):
+        eject_slots = self.find_eject_slots()
+        if not eject_slots:
+            msg = "no loading slots, mms eject skip"
+            gcode_adapter.respond_echo(msg)
+            self.log_info_s(msg)
+            self.mms.log_status()
+            return True
+
+        if self.is_running():
+            msg = "another mms eject is running, skip"
+            gcode_adapter.respond_error(msg)
+            self.log_warning(msg)
+            return False
+
+        with self._eject_is_running():
+            self.log_info_s("mms eject begin")
+
+            # ---- Path I ----
+            # Make sure all mms_buffer are idle
+            for slot_num in eject_slots:
+                self._pause_mms_buffer(slot_num)
+
+            # Only unload need, apply and return
+            for slot_num in eject_slots:
+                if self._entry_is_released(slot_num):
+                    self._unload_only(slot_num)
+
+            # Check again, return early if no slot need to eject
+            eject_slots = self.find_eject_slots()
+            if not eject_slots:
+                msg = "mms eject finish"
+                gcode_adapter.respond_echo(msg)
+                self.log_info_s(msg)
+                return True
+
+            # ---- Path II ----
+            # Check toolhead, must be homed
+            if not toolhead_adapter.is_homed():
+                msg = "toolhead is not homed, mms eject skip"
+                gcode_adapter.respond_error(msg)
+                raise EjectFailedError(
+                    msg, self.mms.get_mms_slot(eject_slots[0]))
+
+            # Heat extruder
+            extruder_adapter.heat_to_min_temp()
+
+            self.log_info_s(f"slots:{eject_slots} would be ejected")
+
+            if self.mms_cut.is_enabled():
+                # Park to cutter init point
+                self.mms_cut.cut_init()
+                # Do Cut
+                if not self.mms_cut.mms_cut():
+                    raise EjectFailedError(
+                        f"slot[{eject_slots[0]}] eject cut failed",
+                        self.mms.get_mms_slot(eject_slots[0])
+                    )
+
+            if self.mms_purge.is_enabled():
+                # Park to tray point
+                self.mms_purge.move_to_tray()
+
+            for slot_num in eject_slots:
+                mms_slot = self.mms.get_mms_slot(slot_num)
+                mms_drive = mms_slot.get_mms_drive()
+
+                # Select
+                self.mms_delivery.select_slot(slot_num)
+                # Make sure buffer sprint is relaxed
+                self.mms_delivery.clear_buffer(slot_num)
+
+                # Sync retract
+                with mms_drive.sync_with_extruder():
+                    extruder_adapter.retract(
+                        EjectConfig.empty_retract_distance,
+                        EjectConfig.empty_retract_speed,
+                    )
+
+                # Exit toolhead check
+                if self._filament_still_in_toolhead(slot_num):
+                    pin = "entry" if mms_slot.entry_is_triggered()\
+                        else "outlet"
+                    msg = f"slot[{slot_num}] eject exit toolhead failed,"\
+                        f" '{pin}' is still triggering"
+                    gcode_adapter.respond_error(msg)
+                    raise EjectFailedError(msg, mms_slot)
+
+                # Unload
+                self.mms_delivery.mms_unload(slot_num)
+
+            msg = "mms eject finish"
+            gcode_adapter.respond_echo(msg)
+            self.log_info_s(msg)
+            return True
+
+    def mms_eject(self):
+        try:
+            self._exec_custom_macro(self.custom_before, "before")
+
+            res = self._standard_eject_sync()
+            self.mms_charge.teardown()
+            if res:
+                self._exec_custom_macro(self.custom_after, "after")
+            return res
+
+        except EjectFailedError as e:
+            self.log_warning(e)
+            gcode_adapter.respond_error("mms eject failed")
+            return False
+        except Exception as e:
+            self.log_error(f"mms eject error: {e}")
+            gcode_adapter.respond_error("mms eject failed")
+            return False
+
     def mms_eject_unselect(self):
         self.mms_eject()
         self.mms_delivery.unselect()
 
+    # ---- GCode ----
     @log_time_cost("log_info_s")
     def cmd_MMS_EJECT(self, gcmd):
+        with toolhead_adapter.snapshot():
+            with toolhead_adapter.safe_z_raise(self.z_raise):
+                self.mms_eject()
+
+    @log_time_cost("log_info_s")
+    def cmd_MMS_EJECT_UNSELECT(self, gcmd):
         with toolhead_adapter.snapshot():
             with toolhead_adapter.safe_z_raise(self.z_raise):
                 self.mms_eject_unselect()

@@ -185,15 +185,9 @@ class SlotRFID:
                 self.log_error(
                     f"slot[{self.slot_num}] RFID read tag data error: {e}")
 
-            # # Continue delivery
-            # self.mms_delivery.mms_prepare(self.slot_num)
-
         elif time.time()-self.read_begin_at > self.read_duration:
             self.rfid_read_end()
             self.log_info(f"slot[{self.slot_num}] RFID read timeout")
-
-            # # Continue delivery
-            # self.mms_delivery.mms_prepare(self.slot_num)
 
     # ---- Flow ----
     @contextmanager
@@ -208,8 +202,6 @@ class SlotRFID:
                     self.rfid_detect_end()
                 if self._is_reading:
                     self.rfid_read_end()
-                    # Continue delivery
-                    # self.mms_delivery.mms_prepare(self.slot_num)
 
     # ---- Truncate ----
     def rfid_truncate(self):

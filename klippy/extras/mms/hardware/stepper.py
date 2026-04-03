@@ -1,6 +1,6 @@
 # Support for MMS Stepper
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -378,6 +378,9 @@ class MMSStepper:
 
     def get_step_dist(self):
         return self.get_mcu_stepper().get_step_dist()
+
+    def get_rotation_distance(self):
+        return self.get_mcu_stepper().get_rotation_distance()[0]
 
     def get_mcu_status(self):
         mcu = self.get_mcu()
@@ -772,9 +775,59 @@ class MMSSelector(MMSStepper):
         self.mms_name = "stepper selector"
         self.interval_time = self.s_config.interval_time_selector
 
+    def get_unselect_distance(self):
+        sel_pins_cnt = 4
+        benchmark_distance = self.get_rotation_distance() \
+            // sel_pins_cnt // 2
+        return benchmark_distance
+
 
 class MMSDrive(MMSStepper):
     def __init__(self, name):
         super().__init__(name)
         self.mms_name = "stepper drive"
         self.interval_time = self.s_config.interval_time_drive
+
+        self._org_trapq = None
+        self._is_syncing = False
+
+    def sync_to_extruder(self):
+        if self._is_syncing:
+            return
+
+        # Flush Toolhead
+        toolhead_a.flush_step_generation()
+        extruder = toolhead_a.get_extruder()
+
+        # Setup MCU_Stepper
+        mcu_stepper = self.get_mcu_stepper()
+        mcu_stepper.set_position([extruder.last_position, 0., 0.])
+        self._org_trapq = mcu_stepper.set_trapq(extruder.get_trapq())
+
+        # Flush motion queuing
+        motion_queuing_a.check_step_generation_scan_windows()
+        self._is_syncing = True
+
+    def unsync_to_extruder(self):
+        if not self._is_syncing:
+            return
+
+        # Flush Toolhead
+        toolhead_a.flush_step_generation()
+
+        # Setup MCU_Stepper
+        mcu_stepper = self.get_mcu_stepper()
+        mcu_stepper.set_trapq(self._org_trapq)
+
+        # Flush motion queuing
+        motion_queuing_a.check_step_generation_scan_windows()
+        self._is_syncing = False
+
+    @contextmanager
+    def sync_with_extruder(self):
+        self.sync_to_extruder()
+        printer_adapter.notify_mms_stepper_running()
+        try:
+            yield
+        finally:
+            self.unsync_to_extruder()

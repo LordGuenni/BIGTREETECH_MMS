@@ -377,6 +377,37 @@ class SlotPinGateInvert(BaseSlotPin):
         return False
 
 
+class SlotPinBufferRunout(BaseSlotPin):
+    def __init__(self, mms_slot, mcu_pin):
+        super().__init__(mms_slot, mcu_pin, PinType().buffer_runout)
+
+    def _setup_pin(self):
+        # No immediate initialization
+        pass
+
+    def set_pin_obj(self, pin_obj):
+        self.pin_obj = pin_obj
+        self.mcu_pin = pin_obj.get_mcu_pin()
+
+    @check_ready
+    def trigger(self, mcu_pin):
+        self._log_state(self.pin_state.triggered)
+        if self.is_waiting():
+            self.mms_slot.complete_drive_moving()
+            self.stop_waiting()
+            return True
+        return False
+
+    @check_ready
+    def release(self, mcu_pin):
+        self._log_state(self.pin_state.released)
+        if self.is_waiting():
+            self.mms_slot.complete_drive_moving()
+            self.stop_waiting()
+            return True
+        return False
+
+
 class SlotPinOutlet(BaseSlotPin):
     def __init__(self, mms_slot, mcu_pin):
         super().__init__(mms_slot, mcu_pin, PinType().outlet)
@@ -438,33 +469,8 @@ class SlotPinEntry(BaseSlotPin):
             return True
         return False
 
-
-class SlotPinBufferRunout(BaseSlotPin):
-    def __init__(self, mms_slot, mcu_pin):
-        super().__init__(mms_slot, mcu_pin, PinType().buffer_runout)
-
-    def _setup_pin(self):
-        # No immediate initialization
-        pass
-
-    def set_pin_obj(self, pin_obj):
-        self.pin_obj = pin_obj
-        self.mcu_pin = pin_obj.get_mcu_pin()
-
-    @check_ready
-    def trigger(self, mcu_pin):
-        self._log_state(self.pin_state.triggered)
-        if self.is_waiting():
-            self.mms_slot.complete_drive_moving()
-            self.stop_waiting()
-            return True
-        return False
-
-    @check_ready
-    def release(self, mcu_pin):
-        self._log_state(self.pin_state.released)
-        if self.is_waiting():
-            self.mms_slot.complete_drive_moving()
-            self.stop_waiting()
-            return True
-        return False
+    def set_stepper(self, mms_stepper):
+        if not self.pin_obj:
+            return
+        # Register mcu_stepper to mcu_endstop, for moving:manual_home
+        self.pin_obj.set_stepper(mms_stepper.get_mcu_stepper())

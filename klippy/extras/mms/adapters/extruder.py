@@ -1,12 +1,13 @@
 # Adapter of printer's Extruder
 #
-# Copyright (C) 2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2025-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 from contextlib import contextmanager
 
 from .base import BaseAdapter
+from .gcode import gcode_adapter
 from .gcode_move import gcode_move_adapter as gm_adp
 from .motion_report import motion_report_adapter as mr_adp
 from .printer import printer_adapter
@@ -28,7 +29,7 @@ class ExtruderAdapter(BaseAdapter):
     def _lazy_setup_logger(self):
         mms_logger = printer_adapter.get_mms_logger()
         self._log_info = mms_logger.create_log_info(console_output=False)
-        self._log_error = mms_logger.create_log_error(console_output=True)
+        self._log_error = mms_logger.create_log_error(console_output=False)
 
     def log_info(self, msg):
         if not self._logger_is_set:
@@ -60,13 +61,20 @@ class ExtruderAdapter(BaseAdapter):
         toolhead_adapter.set_extruder_temperature(temp, wait)
 
     def heat_to_min_temp(self):
-        if self.get_current_temp() < self.get_min_temp():
-            self.set_temperature(self.get_min_temp())
+        min_temp = self.get_min_temp()
+        if self.get_current_temp() < min_temp:
+            msg = (
+                f"extruder[{self.get_extruder_name()}] wait until "
+                f"heated to {min_temp}C"
+            )
+            gcode_adapter.respond_echo(msg)
+            self.set_temperature(min_temp)
 
     def is_hot_enough(self):
         if not self.get_extruder_status().get("can_extrude"):
-            self.log_error(
-                f"extruder[{self.get_extruder_name()}] is not hot enough")
+            msg = f"extruder[{self.get_extruder_name()}] is not hot enough"
+            gcode_adapter.respond_error(msg)
+            self.log_error(msg)
             return False
         return True
 

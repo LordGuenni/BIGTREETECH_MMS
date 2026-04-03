@@ -5,28 +5,32 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .adapters import (
     gcode_adapter,
     printer_adapter,
     toolhead_adapter
 )
+
 from .core.buffer import Buffer, BufferCommand
 from .core.config import (
     OptionalField,
     PrinterConfig,
     StringList
 )
+from .core.dryer import MMSDryer
 from .core.observer import PrintObserver
 from .core.slot_pin import PinType, PinState
 from .core.task import PeriodicTask
+
 from .hardware.button import (
     MMSButtonBufferRunout,
     MMSButtonEntry,
     MMSButtonOutlet,
 )
 from .hardware.stepper import MMSSelector, MMSDrive
+
 from .motion.endless_spool import MMSEndlessSpool
 from .motion.filament_detection import MMSFilamentDetection
 from .motion.pause import MMSPause
@@ -36,12 +40,9 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0415"
+    version: str = "0.1.0440"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
-
-    # MMS Extend module prefix in Config section
-    # mms_extend_prefix = "mms extend"
 
     # Log sample related
     # Sample duration seconds = sample_count * sample_period
@@ -63,23 +64,14 @@ class PrinterMMSConfig(PrinterConfig):
     outlet: str = "buffer:PA5"
     # Buffer Runout Pin
     buffer_runout: str = "buffer:PA4"
+    # Dryer heater
+    dryer_heater: str = "ViViD_Dryer"
+
     # The optional Pin configured for entry_sensor
     entry_sensor: OptionalField = ""
 
     filament_detection_enable: int = 1
     endless_spool_enable: int = 1
-
-
-@dataclass(frozen=True)
-class SlotMetaKey:
-    # outlet: str = "outlet"
-    # buffer_runout: str = "buffer_runout"
-    mms_buffer: str = "mms_buffer"
-    mms_selector: str = "mms_selector"
-    mms_drive: str = "mms_drive"
-
-    is_extended: str = "is_extended"
-    extend_num: str = "extend_num"
 
 
 class MMS:
@@ -91,6 +83,7 @@ class MMS:
         self.pin_type = PinType()
         self.pin_state = PinState()
 
+        self.entry = None
         self.mms_logger = None
         self.mms_swap = None
         self.print_observer = None
@@ -98,8 +91,9 @@ class MMS:
         self._is_connected = False
 
         self.slot_num_lst = [int(num) for num in self.p_mms_config.slot]
-        # Slot object list
+        # MMS Slots
         self.mms_slots = []
+        self.mms_slot_dct = {}
         # List to store mms_extend
         self.mms_extends = []
         # List to store mms_buffer
@@ -115,46 +109,23 @@ class MMS:
 
     # -- Initialize --
     def _initialize(self):
-        # slot_meta : {
-        #     slot_num : {
-        #         "outlet": ...,
-        #         "buffer_runout": ...,
-        #         "mms_buffer": ...,
-        #         "mms_selector": ...,
-        #         "mms_drive": ...,
-        #         "is_extended": ...,
-        #         "extend_num": ...,
-        #     }, ...
-        # }
-        self.slot_meta = {
-            slot_num : {
-                SlotMetaKey.is_extended: False,
-                SlotMetaKey.extend_num: None
-            }
-            for slot_num in self.slot_num_lst
-        }
-
-        # Setup MMS Buffer
-        # Notice mms_buffer should always setup
-        # before outlet and buffer_runout
-        self._parse_mms_buffer(
-            self.slot_num_lst
-        )
-        # Common pin outlet for slots
-        self._parse_outlet(
-            self.p_mms_config.outlet,
-            self.slot_num_lst
-        )
-        # Common pin buffer_runout for slots
+        # Always follow the parsing sequence
+        self._parse_mms_slots(self.slot_num_lst)
+        self._parse_mms_buffer(self.slot_num_lst)
+        # Pins for MMS Slots
         self._parse_buffer_runout(
             self.p_mms_config.buffer_runout,
             self.slot_num_lst
         )
-        # Common pin entry for slots
-        self._parse_entry(
-            self.p_mms_config.entry_sensor
+        self._parse_outlet(
+            self.p_mms_config.outlet,
+            self.slot_num_lst
         )
-        # Setup MMS Steppers
+        self._parse_entry(
+            self.p_mms_config.entry_sensor,
+            self.slot_num_lst
+        )
+        # MMS Steppers
         self._parse_mms_selector(
             self.p_mms_config.selector_name,
             self.slot_num_lst
@@ -175,27 +146,27 @@ class MMS:
         # MMS Buffer command manager
         self.buffer_command = BufferCommand()
 
+        self.mms_dryer = MMSDryer(heater=self.p_mms_config.dryer_heater)
+
+    def _parse_mms_slots(self, slot_num_lst):
+        for slot_num in slot_num_lst:
+            mms_slot = printer_adapter.get_mms_slot(slot_num)
+            if mms_slot not in self.mms_slots:
+                self.mms_slots.append(mms_slot)
+                self.mms_slot_dct[slot_num] = mms_slot
+
+        self.mms_slots.sort(key=lambda mms_slot: mms_slot.get_num())
+
     def _parse_mms_buffer(self, slot_num_lst):
         mms_buffer = Buffer()
-        for slot_num in slot_num_lst:
-            self.slot_meta[slot_num][SlotMetaKey.mms_buffer] = mms_buffer
-
+        mms_buffer.set_index(len(self.mms_buffers))
         self.mms_buffers.append(mms_buffer)
-        mms_buffer.set_index(len(self.mms_buffers)-1)
-        return mms_buffer
-
-    def _parse_outlet(self, mcu_pin, slot_num_lst):
-        outlet = MMSButtonOutlet(mcu_pin)
-        outlet.register_trigger_callback(
-            self.handle_outlet_is_triggered)
-        outlet.register_release_callback(
-            self.handle_outlet_is_released)
 
         for slot_num in slot_num_lst:
-            self.slot_meta[slot_num][self.pin_type.outlet] = outlet
+            mms_slot = self.get_mms_slot(slot_num)
+            mms_slot.set_mms_buffer(mms_buffer)
 
-        mms_buffer = self.slot_meta[slot_num_lst[-1]][SlotMetaKey.mms_buffer]
-        mms_buffer.set_sensor_full(outlet)
+        return mms_buffer
 
     def _parse_buffer_runout(self, mcu_pin, slot_num_lst):
         buffer_runout = MMSButtonBufferRunout(mcu_pin)
@@ -204,39 +175,61 @@ class MMS:
         buffer_runout.register_release_callback(
             self.handle_buffer_runout_is_released)
 
+        is_init = True
         for slot_num in slot_num_lst:
-            self.slot_meta[slot_num][self.pin_type.buffer_runout] = (
-                buffer_runout)
+            mms_slot = self.get_mms_slot(slot_num)
+            mms_slot.set_buffer_runout(buffer_runout)
+            if is_init:
+                mms_slot.get_mms_buffer().set_sensor_runout(buffer_runout)
+                is_init = False
 
-        mms_buffer = self.slot_meta[slot_num_lst[-1]][SlotMetaKey.mms_buffer]
-        mms_buffer.set_sensor_runout(buffer_runout)
+    def _parse_outlet(self, mcu_pin, slot_num_lst):
+        outlet = MMSButtonOutlet(mcu_pin)
+        outlet.register_trigger_callback(
+            self.handle_outlet_is_triggered)
+        outlet.register_release_callback(
+            self.handle_outlet_is_released)
 
-    def _parse_entry(self, mcu_pin):
+        is_init = True
+        for slot_num in slot_num_lst:
+            mms_slot = self.get_mms_slot(slot_num)
+            mms_slot.set_outlet(outlet)
+            if is_init:
+                mms_slot.get_mms_buffer().set_sensor_full(outlet)
+                is_init = False
+
+    def _parse_entry(self, mcu_pin, slot_num_lst):
         if not mcu_pin:
-            self.entry = None
             return
 
-        self.entry = MMSButtonEntry(mcu_pin)
-        self.entry.register_trigger_callback(
-            self.handle_entry_is_triggered)
-        self.entry.register_release_callback(
-            self.handle_entry_is_released)
+        if not self.entry:
+            self.entry = MMSButtonEntry(mcu_pin)
+            self.entry.register_trigger_callback(
+                self.handle_entry_is_triggered)
+            self.entry.register_release_callback(
+                self.handle_entry_is_released)
+
+        for slot_num in slot_num_lst:
+            mms_slot = self.get_mms_slot(slot_num)
+            mms_slot.set_entry(self.entry)
 
     def _parse_mms_selector(self, selector_name, slot_num_lst):
         mms_selector = MMSSelector(selector_name)
-        for slot_num in slot_num_lst:
-            self.slot_meta[slot_num][SlotMetaKey.mms_selector] = mms_selector
-
+        mms_selector.set_index(len(self.mms_selectors))
         self.mms_selectors.append(mms_selector)
-        mms_selector.set_index(len(self.mms_selectors)-1)
+
+        for slot_num in slot_num_lst:
+            mms_slot = self.get_mms_slot(slot_num)
+            mms_slot.set_mms_selector(mms_selector)
 
     def _parse_mms_drive(self, drive_name, slot_num_lst):
         mms_drive = MMSDrive(drive_name)
-        for slot_num in slot_num_lst:
-            self.slot_meta[slot_num][SlotMetaKey.mms_drive] = mms_drive
-
+        mms_drive.set_index(len(self.mms_drives))
         self.mms_drives.append(mms_drive)
-        mms_drive.set_index(len(self.mms_drives)-1)
+
+        for slot_num in slot_num_lst:
+            mms_slot = self.get_mms_slot(slot_num)
+            mms_slot.set_mms_drive(mms_drive)
 
     # -- Register handlers --
     def _register_event(self):
@@ -250,7 +243,6 @@ class MMS:
             self._handle_klippy_firmware_restart)
 
     def _handle_klippy_connect(self):
-        self._initialize_slots()
         self._initialize_gcode()
         self._initialize_loggers()
         self._initialize_swap()
@@ -279,42 +271,38 @@ class MMS:
     # -- Extend module init --
     def extend(self, mms_extend):
         self.mms_extends.append(mms_extend)
+        extend_num = mms_extend.get_num()
 
         # Extend slot_num list
         extend_slot_num_lst = mms_extend.get_slot_nums()
         self.slot_num_lst.extend(extend_slot_num_lst)
-        self.slot_meta.update({
-            slot_num:{
-                SlotMetaKey.is_extended:True,
-                SlotMetaKey.extend_num:mms_extend.get_num()
-            } for slot_num in extend_slot_num_lst
-        })
+        self.slot_num_lst.sort()
 
         # Extend mms_slot object list
-        extend_mms_slots = mms_extend.get_mms_slots()
-        for mms_slot in extend_mms_slots:
-            mms_slot.mark_is_extended()
-            if mms_slot not in self.mms_slots:
-                self.mms_slots.append(mms_slot)
-        self.mms_slots.sort(
-            key=lambda mms_slot: mms_slot.get_num()
-        )
+        self._parse_mms_slots(extend_slot_num_lst)
+        self.mms_slots.sort(key=lambda mms_slot: mms_slot.get_num())
+        for slot_num in extend_slot_num_lst:
+            self.get_mms_slot(slot_num).mark_is_extended(extend_num)
 
         # Extend MMS Buffer
-        mms_buffer = self._parse_mms_buffer(
-            extend_slot_num_lst
-        )
+        mms_buffer = self._parse_mms_buffer(extend_slot_num_lst)
         mms_extend.set_mms_buffer(mms_buffer)
-        # Extend SLOT Outlet
-        self._parse_outlet(
-            mms_extend.get_outlet_pin(),
-            extend_slot_num_lst
-        )
+
         # Extend SLOT Buffer Runout button
         self._parse_buffer_runout(
             mms_extend.get_buffer_runout_pin(),
             extend_slot_num_lst
         )
+        # Extend SLOT Outlet
+        self._parse_outlet(
+            mms_extend.get_outlet_pin(),
+            extend_slot_num_lst
+        )
+        self._parse_entry(
+            self.p_mms_config.entry_sensor,
+            self.slot_num_lst
+        )
+
         # Extend Stepper Selector/Drive
         self._parse_mms_selector(
             mms_extend.get_selector_name(),
@@ -325,16 +313,11 @@ class MMS:
             extend_slot_num_lst
         )
 
-    # -- Initializers --
-    def _initialize_slots(self):
-        for slot_num in self.slot_num_lst:
-            mms_slot = printer_adapter.get_mms_slot(slot_num)
-            if mms_slot not in self.mms_slots:
-                self.mms_slots.append(mms_slot)
-        self.mms_slots.sort(
-            key=lambda mms_slot: mms_slot.get_num()
+        mms_extend.set_mms_dryer(
+            MMSDryer(heater=mms_extend.get_dryer_heater())
         )
 
+    # -- Initializers --
     def _initialize_gcode(self):
         commands = [
             ("MMS", self.cmd_MMS),
@@ -347,6 +330,17 @@ class MMS:
             ("MMS_RFID_READ", self.cmd_MMS_RFID_READ),
             ("MMS_RFID_WRITE", self.cmd_MMS_RFID_WRITE),
             ("MMS_RFID_TRUNCATE", self.cmd_MMS_RFID_TRUNCATE),
+
+            # SLOT Meta
+            ("MMS_SLOT_COLOR", self.cmd_MMS_SLOT_COLOR),
+            ("MMS_SLOT_MATERIAL", self.cmd_MMS_SLOT_MATERIAL),
+
+            ("MMS_SLOT_META", self.cmd_MMS_SLOT_META),
+            ("MMS_SLOT_META_TRUNCATE", self.cmd_MMS_SLOT_META_TRUNCATE),
+
+            # MMS Dryer
+            ("MMS_DRYER_START", self.cmd_MMS_DRYER_START),
+            ("MMS_DRYER_STOP", self.cmd_MMS_DRYER_STOP),
 
             # Alias
             ("MMS00", self.cmd_MMS_STATUS),
@@ -536,27 +530,11 @@ class MMS:
     def get_mms_drives(self):
         return self.mms_drives
 
-    # -- Get slot meta data --
-    def get_meta(self, slot_num):
-        return self.slot_meta.get(slot_num, {})
-
-    def get_mms_buffer(self, slot_num):
-        return self.get_meta(slot_num).get(SlotMetaKey.mms_buffer, None)
-
     def get_mms_buffers(self):
         return self.mms_buffers
 
-    def get_selector(self, slot_num):
-        return self.get_meta(slot_num).get(SlotMetaKey.mms_selector, None)
-
-    def get_drive(self, slot_num):
-        return self.get_meta(slot_num).get(SlotMetaKey.mms_drive, None)
-
-    def get_outlet(self, slot_num):
-        return self.get_meta(slot_num).get(self.pin_type.outlet, None)
-
-    def get_buffer_runout(self, slot_num):
-        return self.get_meta(slot_num).get(self.pin_type.buffer_runout, None)
+    def get_mms_buffer(self, slot_num):
+        return self.get_mms_slot(slot_num).get_mms_buffer()
 
     def get_mms_extend(self, extend_num):
         for mms_extend in self.mms_extends:
@@ -791,44 +769,39 @@ class MMS:
         if slot_num is None:
             raise IndexError(error_msg)
 
-        if not (0 <= slot_num < len(self.mms_slots)):
-            raise IndexError(error_msg)
+        if type(slot_num) is str:
+            if not slot_num.isdigit():
+                raise IndexError(error_msg)
+            slot_num = int(slot_num)
 
-        mms_slot = self.mms_slots[slot_num]
+        mms_slot = self.mms_slot_dct.get(slot_num)
         if mms_slot is None:
             raise IndexError(error_msg)
 
         return mms_slot
 
     def get_main_mms_slots(self):
-        slot_filter = lambda meta: not meta.get(SlotMetaKey.is_extended)
         return [
-            self.get_mms_slot(slot_num)
-            for slot_num,meta in self.slot_meta.items()
-            if slot_filter(meta)
+            mms_slot
+            for mms_slot in self.mms_slots
+            if not mms_slot.is_extended()
         ]
 
     def get_extend_mms_slots(self, extend_num=None):
-        # return the target extend one
-        slot_filter = lambda meta: (
-            meta.get(SlotMetaKey.extend_num) == extend_num
-        )
         if extend_num is not None:
             return [
-                self.get_mms_slot(slot_num)
-                for slot_num,meta in self.slot_meta.items()
-                if slot_filter(meta)
+                mms_slot
+                for mms_slot in self.mms_slots
+                if mms_slot.get_extend_num() == extend_num
             ]
 
-        # Default return all extend sets
-        slot_filter = lambda meta: not meta.get(SlotMetaKey.is_extended)
-        lst = [
-            self.get_mms_slot(slot_num)
-            for slot_num,meta in self.slot_meta.items()
-            if slot_filter(meta)
+        # Default return all extend mms_slots
+        # lst.sort(key=lambda s: s.get_num())
+        return [
+            mms_slot
+            for mms_slot in self.mms_slots
+            if mms_slot.is_extended()
         ]
-        lst.sort(key=lambda s: s.get_num())
-        return lst
 
     # -- Check Related --
     def slot_is_available(self, slot_num, can_none=False):
@@ -883,38 +856,10 @@ class MMS:
         return bool(self.p_mms_config.endless_spool_enable)
 
     # -- MMS Status --
-    def _format_slot_status(self, slot_num):
-        slot = self.get_mms_slot(slot_num)
-        meta = self.slot_meta.get(slot_num)
-
-        return {
-            # Pins state
-            "selector": slot.selector.get_state(),
-            "inlet": slot.inlet.get_state(),
-            "gate": slot.gate.get_state(),
-            "runout": slot.buffer_runout.get_state(),
-            "outlet": slot.outlet.get_state(),
-            "entry": slot.entry.get_state(),
-
-            # mms_buffer
-            "buffer_index" : meta.get(SlotMetaKey.mms_buffer).get_index(),
-            # mms_selector
-            "selector_index" : meta.get(SlotMetaKey.mms_selector).get_index(),
-            # mms_drive
-            "drive_index" : meta.get(SlotMetaKey.mms_drive).get_index(),
-
-            # Extend
-            SlotMetaKey.is_extended : meta.get(SlotMetaKey.is_extended),
-            SlotMetaKey.extend_num : meta.get(SlotMetaKey.extend_num),
-        }
-
     def get_status(self, eventtime=None):
-        if not self._is_connected:
-            return {}
-
         return {
             "slots" : {
-                slot.get_num() : self._format_slot_status(slot.get_num())
+                slot.get_num() : slot.meta.report()
                 for slot in self.mms_slots
             },
             "steppers" : {
@@ -931,8 +876,13 @@ class MMS:
                 b.get_index() : b.get_status()
                 for b in self.mms_buffers
             },
-            "loading_slots" : self.get_loading_slots()
-        }
+            "extends" : {
+                extend.get_num() : extend.report()
+                for extend in self.mms_extends
+            },
+            "loading_slots" : self.get_loading_slots(),
+            "dryer": self.mms_dryer.report(),
+        } if self._is_connected else {}
 
     def log_status(self, silent=True):
         self.log_status_stepper(silent=True)
@@ -1043,11 +993,133 @@ class MMS:
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.slot_rfid.rfid_truncate()
 
+    def cmd_MMS_SLOT_COLOR(self, gcmd):
+        """
+        Usage:
+            MMS_SLOT_COLOR SLOT=0 CODE='#FF00FF'
+        """
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.slot_is_available(slot_num):
+            return
+
+        color_code = gcmd.get("CODE")
+        mms_slot = self.get_mms_slot(slot_num)
+        mms_slot.set_filament_color(color_code)
+
+    def cmd_MMS_SLOT_MATERIAL(self, gcmd):
+        """
+        Usage:
+            MMS_SLOT_MATERIAL SLOT=0 MATERIAL='PLA-CF'
+        """
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.slot_is_available(slot_num):
+            return
+
+        material = gcmd.get("MATERIAL")
+        mms_slot = self.get_mms_slot(slot_num)
+        mms_slot.set_filament_material(material)
+
+    def cmd_MMS_DRYER_START(self, gcmd):
+        """
+        Usage:
+            MMS_DRYER_START MATERIAL='PLA'
+            MMS_DRYER_START MATERIAL='PLA' GROUP=1
+        """
+        material = gcmd.get("MATERIAL")
+        extend_num = gcmd.get_int("GROUP", default=None)
+
+        if extend_num is None:
+            self.mms_dryer.start_heating(material_name=material)
+            return
+
+        mms_extend = self.get_mms_extend(extend_num)
+        if not mms_extend:
+            return
+        mms_dryer = mms_extend.get_mms_dryer()
+        if not mms_dryer:
+            return
+
+        mms_dryer.start_heating(material_name=material)
+
+    def cmd_MMS_DRYER_STOP(self, gcmd):
+        """
+        Usage:
+            MMS_DRYER_STOP
+            MMS_DRYER_STOP GROUP=1
+        """
+        extend_num = gcmd.get_int("GROUP", default=None)
+
+        if extend_num is None:
+            self.mms_dryer.stop_heating()
+            return
+
+        mms_extend = self.get_mms_extend(extend_num)
+        if not mms_extend:
+            return
+        mms_dryer = mms_extend.get_mms_dryer()
+        if not mms_dryer:
+            return
+
+        mms_dryer.stop_heating()
+
+    def cmd_MMS_SLOT_META(self, gcmd):
+        """
+        Usage:
+            MMS_SLOT_META SLOT=0
+        """
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.slot_is_available(slot_num):
+            return
+
+        mms_slot = self.get_mms_slot(slot_num)
+        self.log_info(json.dumps(mms_slot.meta.report(), indent=4))
+
+    def cmd_MMS_SLOT_META_TRUNCATE(self, gcmd):
+        """
+        Usage:
+            MMS_SLOT_META_TRUNCATE SLOT=0
+        """
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.slot_is_available(slot_num):
+            return
+
+        mms_slot = self.get_mms_slot(slot_num)
+        with mms_slot.update_deliver_distance():
+            mms_slot.truncate_deliver_distance()
+            self.log_info(
+                f"slot[{slot_num}] deliver distance in meta is truncated")
+
     def cmd_MMS_TEST(self, gcmd):
-        return
+        # return
+
+        def format(mcu_stepper):
+            return {
+                "name" : mcu_stepper.get_name(),
+
+                "oid" : mcu_stepper.get_oid(),
+                "step_dist" : mcu_stepper.get_step_dist(),
+                "rotation_distance" : mcu_stepper.get_rotation_distance()[0],
+                "steps_per_rotation" : mcu_stepper.get_rotation_distance()[1],
+
+                "commanded_position" : mcu_stepper.get_commanded_position(),
+                "mcu_position=step" : mcu_stepper.get_mcu_position(),
+            }
+
+        slot_num = 0
+        mms_slot = self.get_mms_slot(slot_num)
+        mms_drive = mms_slot.get_mms_drive()
+        m_mcu_stepper = mms_drive.get_mcu_stepper()
+        m_status = format(m_mcu_stepper)
+        self.log_info(json.dumps(m_status, indent=4))
+
+        exturder = toolhead_adapter.get_extruder()
+        e_stepper = exturder.extruder_stepper
+        e_mcu_stepper = e_stepper.stepper
+        e_status = format(e_mcu_stepper)
+        self.log_info(json.dumps(e_status, indent=4))
 
 
 def load_config(config):
     mms = MMS(config)
-    printer_adapter.notify_mms_initialized(mms)
+    printer_adapter.notify_mms_extend(mms)
     return mms

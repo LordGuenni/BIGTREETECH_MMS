@@ -35,10 +35,12 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from .config import PrinterConfig
 from .slot_led import SlotLED
+from .slot_meta import SlotMeta
 from .slot_pin import (
     PinType,
     PinState,
@@ -100,15 +102,19 @@ class MMSSlot:
         # RFID, init after klippy is connected
         self.slot_rfid = None
 
+        # Extend support
         self._is_extended = False
+        self._extend_num = None
+
+        # Delivery support
+        self._can_update_deliver_distance = False
+
         self._is_ready = False
 
         # Initialize Pins
         self._initialize_pins()
 
         # Register connect handler to printer
-        printer_adapter.register_mms_initialized(
-            self._handle_mms_initialized)
         printer_adapter.register_klippy_connect(
             self._handle_klippy_connect)
         printer_adapter.register_klippy_ready(
@@ -134,46 +140,50 @@ class MMSSlot:
             self.pin_type.entry: self.entry,
         }
 
-    def _handle_mms_initialized(self, mms):
-        # Initialize from MMS
-        assert mms, "MMS not found"
-        self.mms = mms
-
-        # MMS Buffer
-        self.mms_buffer = self.mms.get_mms_buffer(self.num)
-        self.mms_buffer.register_slot_num(self.num)
-
-        # MMS Stepper
-        self.mms_selector = self.mms.get_selector(self.num)
-        self.mms_drive = self.mms.get_drive(self.num)
-
-        # Setup mcu_stepper for mcu_endstop
-        self.selector.set_stepper(self.mms_selector)
-        self.inlet.set_stepper(self.mms_drive)
-        self.gate.set_stepper(self.mms_drive)
-
-        self.buffer_runout.set_pin_obj(
-            self.mms.get_buffer_runout(self.num))
-        self.buffer_runout.set_stepper(self.mms_drive)
-
-        self.outlet.set_pin_obj(self.mms.get_outlet(self.num))
-        self.outlet.set_stepper(self.mms_drive)
-
-        entry = self.mms.get_entry()
-        if entry:
-            self.entry.set_pin_obj(entry)
-            self.entry.set_stepper(self.mms_drive)
-
     def _handle_klippy_connect(self):
         self._initialize_loggers()
         self._initialize_led()
         self._initialize_rfid()
+        self._initialize_meta()
+
+    def _initialize_meta(self):
+        self.meta = SlotMeta()
+        # self.meta.pin_selector = self.slot_config.selector
+        # self.meta.pin_inlet = self.slot_config.inlet
+        # self.meta.pin_gate = self.slot_config.gate
+
+        self.meta.num = self.num
+
+        self.meta.mms_buffer_index = self.mms_buffer.get_index()
+        self.meta.mms_selector_index = self.mms_selector.get_index()
+        self.meta.mms_drive_index = self.mms_drive.get_index()
+
+        self.meta.mms_buffer = self.mms_buffer
+        self.meta.mms_selector = self.mms_selector
+        self.meta.mms_drive = self.mms_drive
+
+        self.meta.is_extended = self._is_extended
+        self.meta.extend_num = self._extend_num
+
+        self.meta.selector = self.selector
+        self.meta.inlet = self.inlet
+        self.meta.gate = self.gate
+        self.meta.outlet = self.outlet
+        self.meta.buffer_runout = self.buffer_runout
+        self.meta.entry = self.entry
+
+        # self.meta.filament_color = self.filament_color
+        # self.meta.filament_material = self.filament_material
+
+        cfg_path = printer_adapter.get_klippy_configfile()
+        self.meta.set_cfg_path(cfg_path)
 
     def _handle_klippy_ready(self):
         self.reactor.register_timer(
             callback=self._init_led_notify,
             waketime=self.reactor.monotonic()+self.led_notify_delay
         )
+
         # Register led effect deactivate callback
         printer_adapter.register_mms_stepper_running(
             handler=self._handle_mms_stepper_running)
@@ -203,13 +213,36 @@ class MMSSlot:
         self.slot_led.notify()
         return self.reactor.NEVER
 
-    def get_status(self, eventtime=None):
-        if not self._is_ready:
-            return {}
+    # ---- MMS Setup ----
+    def set_mms_buffer(self, mms_buffer):
+        # MMS Buffer
+        self.mms_buffer = mms_buffer
+        self.mms_buffer.register_slot_num(self.num)
 
-        return {
-            "rfid" : self.slot_rfid.get_status(),
-        }
+    def set_buffer_runout(self, buffer_runout):
+        self.buffer_runout.set_pin_obj(buffer_runout)
+
+    def set_outlet(self, outlet):
+        self.outlet.set_pin_obj(outlet)
+
+    def set_entry(self, entry):
+        self.entry.set_pin_obj(entry)
+
+    def set_mms_selector(self, mms_selector):
+        # MMS Stepper
+        self.mms_selector = mms_selector
+        # Setup mcu_stepper for mcu_endstop
+        self.selector.set_stepper(self.mms_selector)
+
+    def set_mms_drive(self, mms_drive):
+        # MMS Stepper
+        self.mms_drive = mms_drive
+        # Setup mcu_stepper for mcu_endstop
+        self.inlet.set_stepper(self.mms_drive)
+        self.gate.set_stepper(self.mms_drive)
+        self.buffer_runout.set_stepper(self.mms_drive)
+        self.outlet.set_stepper(self.mms_drive)
+        self.entry.set_stepper(self.mms_drive)
 
     # ---- Get properties ----
     def get_num(self):
@@ -218,8 +251,8 @@ class MMSSlot:
     def autoload_is_enabled(self):
         return bool(self.slot_config.autoload_enable)
 
-    def get_rfid_status(self):
-        return self.slot_rfid.get_status()
+    # def get_rfid_status(self):
+    #     return self.slot_rfid.get_status()
 
     def get_mms_selector(self):
         return self.mms_selector
@@ -230,11 +263,11 @@ class MMSSlot:
     def get_mms_buffer(self):
         return self.mms_buffer
 
-    def mark_is_extended(self):
-        self._is_extended = True
-
     def is_extended(self):
         return self._is_extended
+
+    def get_extend_num(self):
+        return self._extend_num
 
     def get_endless_with_slot(self):
         return self.slot_config.endless_with_slot
@@ -242,7 +275,14 @@ class MMSSlot:
     def get_selector_calibrate_distance(self):
         return abs(self.slot_config.selector_calibrate_distance)
 
+    def get_status(self, eventtime=None):
+        return self.meta.report() if self._is_ready else {}
+
     # ---- MMS support ----
+    def mark_is_extended(self, extend_num):
+        self._is_extended = True
+        self._extend_num = extend_num
+
     def get_mms_slot_pin(self, pin_type):
         return self.slot_pin_map.get(pin_type, None)
 
@@ -254,6 +294,12 @@ class MMSSlot:
             elif pin_state == self.pin_state.released:
                 return slot_pin.release(mcu_pin)
         return False
+
+    def set_filament_color(self, color_code):
+        self.meta.filament_color = color_code
+
+    def set_filament_material(self, material):
+        self.meta.filament_material = material
 
     # ---- MMS LED support ----
     def get_led_name(self):
@@ -281,6 +327,29 @@ class MMSSlot:
         return dct
 
     # ---- MMS Delivery support ----
+    def get_deliver_distance(self, pin_type, forward):
+        return self.meta.get_deliver_distance(pin_type, forward)
+
+    def set_deliver_distance(self, pin_type, forward, distance):
+        if self._can_update_deliver_distance:
+            self.meta.set_deliver_distance(pin_type, forward, distance)
+            return True
+        return False
+
+    def truncate_deliver_distance(self):
+        if self._can_update_deliver_distance:
+            self.meta.truncate_deliver_distance()
+            return True
+        return False
+
+    @contextmanager
+    def update_deliver_distance(self):
+        self._can_update_deliver_distance = True
+        try:
+            yield
+        finally:
+            self._can_update_deliver_distance = False
+
     def get_wait_func(self, pin_type):
         slot_pin = self.get_mms_slot_pin(pin_type)
         return slot_pin.wait_callback if slot_pin else None

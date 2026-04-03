@@ -35,6 +35,7 @@ class KlippyEvent:
     disconnect: str = "klippy:disconnect"
     firmware_restart: str = "klippy:firmware_restart"
 
+    mms_extend: str = "mms:extend"
     mms_initialized: str = "mms:initialized"
     mms_stepper_running: str = "mms:stepper:running"
     mms_stepper_idle: str = "mms:stepper:idle"
@@ -99,6 +100,12 @@ class PrinterAdapter(BaseAdapter):
         return self.printer.send_event(event, *params)
 
     # ---- Quick methods for MMS ----
+    def register_mms_extend(self, handler):
+        self.register_event(self.klippy_event.mms_extend, handler)
+
+    def notify_mms_extend(self, mms):
+        self.send_event(self.klippy_event.mms_extend, mms)
+
     def register_mms_initialized(self, handler):
         self.register_event(self.klippy_event.mms_initialized, handler)
 

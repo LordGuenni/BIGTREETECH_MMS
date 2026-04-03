@@ -45,7 +45,7 @@ class NeopixelAdapter(BaseAdapter):
                 try:
                     neopixel.send_data()
                 except Exception as e:
-                    self.log_warning_s(f"mms neopixel update error: {e}")
+                    self.log_warning_s(f"neopixel update error: {e}")
         self.reactor.register_callback(reactor_bgfunc)
 
 

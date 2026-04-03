@@ -8,7 +8,7 @@
 # ==|= Gate =|      Relax <--    --> Compress /    | <-- Retract
 #   +----------------------------------------+
 #
-# Copyright (C) 2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2025-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -23,7 +23,7 @@ from ..adapters import (
     printer_adapter,
 )
 from ..core.exceptions import DeliveryTerminateSignal
-from ..core.task import PeriodicTask
+from ..core.task import AsyncTask, PeriodicTask
 
 
 @dataclass(frozen=True)
@@ -52,9 +52,8 @@ class BufferConfig:
 
     # Spring stroke measure config
     # Max distance of Spring stroke measure, in mm
-    # max_measure_distance: float = 15
+    max_measure_distance: float = 30
     # Distance of per step, in mm
-    measure_step: float = 1
     measure_speed: float = 10.0
     measure_accel: float = 10.0
 
@@ -64,6 +63,9 @@ class BufferConfig:
     # Extruder extrude/retract distance limit
     e_distance_moved_min: float = -20
     e_distance_moved_max: float = 100
+
+    sprint_speed: float = 50 # mm/s
+    sprint_accel: float = 150 # mm/s^2
 
     # ---- Calculate ----
     # Cross section of filament, in mm^2
@@ -142,7 +144,8 @@ class Buffer:
         self.log_error = mms_logger.create_log_error(console_output=True)
 
         self.log_info_s = mms_logger.create_log_info(console_output=False)
-        self.log_warning_s = mms_logger.create_log_warning(console_output=False)
+        self.log_warning_s = mms_logger.create_log_warning(
+            console_output=False)
 
     def _initialize_task(self):
         self._p_task = PeriodicTask()
@@ -308,7 +311,8 @@ class Buffer:
             if self._p_task.schedule(self._monitor):
                 self._p_task.start()
         except Exception as e:
-            self.log_error(f"buffer[{self._index}] monitor activate error: {e}")
+            self.log_error(
+                f"buffer[{self._index}] monitor activate error: {e}")
             return
 
         self.log_info_s(f"buffer[{self._index}] monitor activated")
@@ -331,6 +335,96 @@ class Buffer:
         self.log_info_s(f"buffer[{self._index}] monitor deactivated")
         self._is_activating = False
         self._inlet_has_triggered = False
+
+    # def _monitor_lazy(self, slot_num):
+    #     if self._is_freezing:
+    #         return
+
+    #     if slot_num not in self._binding_slot_nums:
+    #         return
+
+    #     if self.is_empty():
+    #         with self._freeze_volume():
+    #             mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
+    #             mms_drive.update_focus_slot(slot_num)
+
+    #             distance = 5
+    #             speed = self.sprint_speed
+    #             accel = self.sprint_accel
+
+    #             self.log_info_s(
+    #                 f"slot[{slot_num}] 'feed' {distance:.2f} mm")
+    #             try:
+    #                 # No select method
+    #                 mms_drive.manual_move(distance, speed, accel)
+    #             except Exception as e:
+    #                 self.log_error(f"slot[{slot_num}] 'feed' error: {e}")
+
+    # def activate_monitor_lazy(self, slot_num):
+    #     if not self._p_task \
+    #         or self._p_task.is_running() \
+    #         or self._is_activating:
+    #         self.log_warning_s(
+    #             f"buffer[{self._index}] another "
+    #             "buffer monitor task is activating, "
+    #             "activate monitor skip..."
+    #         )
+    #         return
+
+    #     # Reset last extruder position
+    #     self._last_e_position = extruder_adapter.get_position()
+
+    #     try:
+    #         if self._p_task.schedule(
+    #             self._monitor_lazy,
+    #             {"slot_num":slot_num}
+    #         ):
+    #             self._p_task.start()
+    #     except Exception as e:
+    #         self.log_error(
+    #             f"buffer[{self._index}] monitor lazy activate error: {e}")
+    #         return
+
+    #     self.log_info_s(f"buffer[{self._index}] monitor lazy activated")
+    #     self._is_activating = True
+    #     self._inlet_has_triggered = False
+
+    # def _sprint_fill(self, slot_num, distance, speed):
+    #     if self._is_freezing:
+    #         return
+    #     if slot_num not in self._binding_slot_nums:
+    #         return
+
+    #     distance = abs(distance)
+    #     # speed = self.sprint_speed
+    #     speed = speed
+    #     accel = self.sprint_accel
+
+    #     self.log_info_s(f"slot[{slot_num}] sprint fill {distance:.2f} mm")
+    #     mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
+    #     with self._freeze_volume():
+    #         try:
+    #             # No select method
+    #             mms_drive.update_focus_slot(slot_num)
+    #             mms_drive.manual_move(distance, speed, accel)
+    #         except Exception as e:
+    #             self.log_error(f"slot[{slot_num}] sprint fill error: {e}")
+
+    # def async_sprint_fill(self, slot_num, distance, speed):
+    #     func = self._sprint_fill
+    #     params = {
+    #         "slot_num" : slot_num,
+    #         "distance" : distance,
+    #         "speed" : speed
+    #     }
+    #     async_task = AsyncTask()
+    #     try:
+    #         if async_task.setup(func, params):
+    #             async_task.start()
+    #     except Exception as e:
+    #         self.log_error(f"slot[{slot_num}] async sprint fill error: {e}")
+    #         return False
+    #     return True
 
     # ---- Feed & Retract ----
     def _validate_volume(self, volume):
@@ -425,7 +519,7 @@ class Buffer:
         return self._execute("retract", volume, None)
 
     # ---- Control ----
-    def fill(self, slot_num, speed=None, accel=None):
+    def fill(self, slot_num):
         if not self._stroke_is_measured:
             self.measure_stroke(slot_num)
 
@@ -433,25 +527,20 @@ class Buffer:
             return True
 
         try:
-            self.mms_delivery.load_to_outlet(
-                slot_num, speed=speed, accel=accel
-            )
+            self.mms_delivery.fill_buffer(slot_num)
             self.log_info_s(
-                f"slot[{slot_num}] buffer[{self._index}] fill success"
-            )
+                f"slot[{slot_num}] buffer[{self._index}] fill success")
             return True
         except DeliveryTerminateSignal:
             self.log_error(
-                f"slot[{slot_num}] buffer[{self._index}] fill is terminated"
-            )
+                f"slot[{slot_num}] buffer[{self._index}] fill is terminated")
             return False
         except Exception as e:
             self.log_error(
-                f"slot[{slot_num}] buffer[{self._index}] fill error: {e}"
-            )
+                f"slot[{slot_num}] buffer[{self._index}] fill error: {e}")
             return False
 
-    def clear(self, slot_num, speed=None, accel=None):
+    def clear(self, slot_num):
         if not self._stroke_is_measured:
             self.measure_stroke(slot_num)
 
@@ -459,46 +548,26 @@ class Buffer:
             return True
 
         try:
-            self.mms_delivery.unload_until_buffer_runout_trigger(
-                slot_num, speed=speed, accel=accel
-            )
+            self.mms_delivery.clear_buffer(slot_num)
             self.log_info_s(
-                f"slot[{slot_num}] buffer[{self._index}] clear success"
-            )
+                f"slot[{slot_num}] buffer[{self._index}] clear success")
             return True
         except DeliveryTerminateSignal:
             self.log_error(
-                f"slot[{slot_num}] buffer[{self._index}] clear is terminated"
-            )
+                f"slot[{slot_num}] buffer[{self._index}] clear is terminated")
             return False
         except Exception as e:
             self.log_error(
-                f"slot[{slot_num}] buffer[{self._index}] clear error: {e}"
-            )
+                f"slot[{slot_num}] buffer[{self._index}] clear error: {e}")
             return False
 
-    def halfway(self, slot_num, speed=None, accel=None):
+    def halfway(self, slot_num):
         if not self._stroke_is_measured:
             self.measure_stroke(slot_num)
 
         try:
-            # First let buffer_runout trigger
-            self.mms_delivery.unload_until_buffer_runout_trigger(
-                slot_num, speed=speed, accel=accel
-            )
-            # Secondary let buffer_runout release
-            self.mms_delivery.load_until_buffer_runout_release(
-                slot_num, speed=speed, accel=accel
-            )
-
-            # Than move forward half of spring stroke
-            distance = abs(self.spring_stroke * 0.5)
-            speed = speed or distance * 2
-            accel = accel or distance * 2
-            # success = self.mms_delivery.mms_drip_move(
-            #             slot_num, distance, speed, accel)
-            success = self.mms_delivery.mms_move(
-                        slot_num, distance, speed, accel)
+            success = self.mms_delivery.halfway_buffer(
+                slot_num, self.spring_stroke)
             if not success:
                 return False
 
@@ -528,23 +597,18 @@ class Buffer:
             return
 
         try:
-            mms_drive = self.mms.get_mms_slot(slot_num).get_mms_drive()
-
             self.log_info_s(
-                f"slot[{slot_num}] buffer[{self._index}] measure stroke begin"
+                f"slot[{slot_num}] buffer[{self._index}] "
+                "measure stroke begin"
             )
 
-            self.mms_delivery.load_to_outlet(slot_num)
-            self.mms_delivery.unload_until_buffer_runout_trigger(
-                slot_num = slot_num,
-                speed = self.measure_speed,
-                accel = self.measure_accel
-            )
-
-            distance_moved = round(abs(mms_drive.get_distance_moved()), 4)
             old_stroke = self.spring_stroke
-            self.spring_stroke = min(distance_moved, old_stroke)
+            measured_stroke = self.mms_delivery.measure_buffer(
+                slot_num, self.max_measure_distance,
+                self.measure_speed, self.measure_accel)
+            self.spring_stroke = min(measured_stroke, old_stroke)
             self._stroke_is_measured = True
+
             self.log_info_s(
                 f"buffer[{self._index}] spring stroke is measured, "
                 f"update from {old_stroke} mm to {self.spring_stroke} mm")
@@ -675,7 +739,6 @@ class Buffer:
             "target_volume" : self.target_volume,
             "min_deliver_volume" : self.min_deliver_volume,
 
-            "measure_step" : self.measure_step,
             "measure_speed" : self.measure_speed,
             "measure_accel" : self.measure_accel,
 
@@ -773,8 +836,6 @@ class BufferCommand:
 
     def cmd_MMS_BUFFER_FILL(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)
-        speed = gcmd.get_float("SPEED", default=None, minval=0.)
-        accel = gcmd.get_float("ACCEL", default=None, minval=0.)
         if not self.mms.slot_is_available(slot_num):
             return
 
@@ -788,12 +849,10 @@ class BufferCommand:
                 f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
-        mms_buffer.fill(slot_num, speed, accel)
+        mms_buffer.fill(slot_num)
 
     def cmd_MMS_BUFFER_CLEAR(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)
-        speed = gcmd.get_float("SPEED", default=None, minval=0.)
-        accel = gcmd.get_float("ACCEL", default=None, minval=0.)
         if not self.mms.slot_is_available(slot_num):
             return
 
@@ -807,12 +866,10 @@ class BufferCommand:
                 f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
-        mms_buffer.clear(slot_num, speed, accel)
+        mms_buffer.clear(slot_num)
 
     def cmd_MMS_BUFFER_HALFWAY(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)
-        speed = gcmd.get_float("SPEED", default=None, minval=0.)
-        accel = gcmd.get_float("ACCEL", default=None, minval=0.)
         if not self.mms.slot_is_available(slot_num):
             return
 
@@ -826,4 +883,4 @@ class BufferCommand:
                 f"slot[{slot_num}] is not belong to target MMS Buffer")
             return
 
-        mms_buffer.halfway(slot_num, speed, accel)
+        mms_buffer.halfway(slot_num)
