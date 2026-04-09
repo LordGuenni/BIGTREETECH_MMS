@@ -265,10 +265,10 @@ class MMSBrush:
 
         self.log_info_s(f"{log_prefix} finish")
 
-        if self.custom_before:
+        if self.custom_after:
             self.log_info(
-                f"MMS execute macro before BRUSH: {self.custom_before}")
-            gcode_adapter.run_command(self.custom_before)
+                f"MMS execute macro after BRUSH: {self.custom_after}")
+            gcode_adapter.run_command(self.custom_after)
 
         return True
 
