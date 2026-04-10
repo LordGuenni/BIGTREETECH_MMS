@@ -1,6 +1,6 @@
 # Support for MMS Service
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -201,6 +201,8 @@ class PeriodicTask:
         self.params = None
         # An optional callback function to be called with the result of func
         self.callback = None
+        # An optional callback function to be called when task is timeout
+        self.timeout_callback = None
 
         # The timer object registered with the reactor
         self.timer = None
@@ -233,7 +235,10 @@ class PeriodicTask:
         if not self.running:
             self.timeout = timeout
 
-    def schedule(self, func, params=None, callback=None):
+    def schedule(
+        self, func,
+        params=None, callback=None, timeout_callback=None
+    ):
         """
         Schedule a periodic task.
         Args:
@@ -268,6 +273,7 @@ class PeriodicTask:
         self.func = func
         self.params = params
         self.callback = callback
+        self.timeout_callback = timeout_callback
         return True
 
     def _teardown(self):
@@ -283,6 +289,7 @@ class PeriodicTask:
             self.func = None
             self.params = None
             self.callback = None
+            self.timeout_callback = None
 
     def get_next_waketime(self):
         return self.reactor.monotonic() + self.period
@@ -323,6 +330,8 @@ class PeriodicTask:
         if self.timeout is not None and self.start_at is not None:
             if time.time() - self.start_at > self.timeout:
                 self.log_info(f"periodic task execution timeout, exit")
+                if self.timeout_callback:
+                    self.timeout_callback()
                 self.stop()
                 return self.reactor.NEVER
 

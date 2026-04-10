@@ -278,6 +278,14 @@ class MMSSlot:
     def get_status(self, eventtime=None):
         return self.meta.report() if self._is_ready else {}
 
+    # ---- RFID support ----
+    def rfid_is_enabled(self):
+        return self.slot_config.rfid_enable
+
+    def rfid_is_detecting(self):
+        return self.slot_rfid.is_detecting() or \
+            self.slot_rfid.mms_rfid.is_detecting()
+
     # ---- MMS support ----
     def mark_is_extended(self, extend_num):
         self._is_extended = True
@@ -430,7 +438,7 @@ class MMSSlot:
         # Remove handler
         # printer_adapter.register_mms_stepper_running(handler=None)
 
-    # ---- Pin Status ----
+    # ---- Log ----
     def format_pins_status(self):
         info = f"slot[{self.num}] "
         info += f"selector={1 if self.selector.is_triggered() else 0} "
@@ -443,6 +451,25 @@ class MMSSlot:
         info += "\n"
         return info
 
+    def format_deliver_distance(self):
+        info = f"slot[{self.num}] "
+
+        f_pin = self.pin_type.entry \
+            if self.entry.is_set() else self.pin_type.outlet
+        b_pin = self.pin_type.gate
+
+        # Deliver forward to trigger Entry
+        dist = self.meta.get_deliver_distance(f_pin, forward=True)
+        info += f"{b_pin}->{f_pin}:{dist or 0:.2f}mm, "
+
+        # Deliver backward to release Entry
+        dist = self.meta.get_deliver_distance(b_pin, forward=False)
+        info += f"{b_pin}<-{f_pin}:{dist or 0:.2f}mm"
+
+        info += "\n"
+        return info
+
+    # ---- Pin Status ----
     # Inlet is triggered
     def is_ready(self):
         """Check if inlet is triggered"""

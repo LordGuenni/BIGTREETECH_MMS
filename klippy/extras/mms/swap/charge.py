@@ -19,16 +19,9 @@ from ..core.logger import log_time_cost
 from ..core.task import AsyncTask
 
 
-@dataclass(frozen=True)
-class ChargeConfig:
-    sprint_distance = 100 # mm
-
-    # Extrude distance to fill space
-    # from entry/outlet triggered to nozzle
-    fill_extrude_distance = 75  # mm
-    fill_extrude_speed = 600    # mm/min
-
-    charge_confirm_distance = 20  # mm
+# @dataclass(frozen=True)
+# class ChargeConfig:
+#     charge_confirm_distance = 20  # mm
 
 
 @dataclass(frozen=True)
@@ -37,30 +30,38 @@ class PrinterChargeConfig(PrinterConfig):
     # Unit: mm
     z_raise: float = 1.0
 
-    # Filament Extrusion Settings
-    # Distance the extruder extrude filament during charging operation.
-    # This is also the second phase of
-    # standard filament swap operations (e.g., 'T*' command).
-    # Total extrusion = extrude_distance × extrude_times
-    # Unit: mm
-    extrude_distance: float = 2.0
-    # Number of extrusion cycles performed
-    extrude_times: int = 5
-    # Extruder extrusion speed
-    # Unit: mm/min
-    extrude_speed: float = 300.0
+    # # Filament Extrusion Settings
+    # # Distance the extruder extrude filament during charging operation.
+    # # This is also the second phase of
+    # # standard filament swap operations (e.g., 'T*' command).
+    # # Total extrusion = extrude_distance × extrude_times
+    # # Unit: mm
+    # extrude_distance: float = 2.0
+    # # Number of extrusion cycles performed
+    # extrude_times: int = 5
+    # # Extruder extrusion speed
+    # # Unit: mm/min
+    # extrude_speed: float = 300.0
 
-    # Extruder extrude distance per drip
-    # Unit: mm
-    drip_extrude_distance: float = 1.0
-    # Extra distance of extruder drip extrude
-    # Unit: mm
-    drip_extra_distance: float = 10.0
+    # # Extruder extrude distance per drip
+    # # Unit: mm
+    # drip_extrude_distance: float = 1.0
+    # # Extra distance of extruder drip extrude
+    # # Unit: mm
+    # drip_extra_distance: float = 10.0
 
-    # Filament Unload Settings (for failed charge attempts)
-    # If filament is not properly loaded, unload before retry
-    # Unit: mm
-    distance_unload: float = 120.0
+    # # Filament Unload Settings (for failed charge attempts)
+    # # If filament is not properly loaded, unload before retry
+    # # Unit: mm
+    # distance_unload: float = 120.0
+
+    # Sprint distance before charge
+    sprint_distance: float = 100.0 # mm
+
+    # Extrude distance to fill space
+    # from entry/outlet triggered to nozzle
+    fill_extrude_distance: float = 75.0  # mm
+    fill_extrude_speed: float = 600.0    # mm/min
 
     # Custom Macro
     custom_before: OptionalField = "MMS_CHARGE_CUSTOM_BEFORE"
@@ -80,7 +81,7 @@ class MMSCharge:
 
         self.reactor = printer_adapter.get_reactor()
 
-        self.charge_config = ChargeConfig()
+        # self.charge_config = ChargeConfig()
 
         # State tracking
         self._is_running = False
@@ -108,7 +109,7 @@ class MMSCharge:
     def _initialize_gcode(self):
         commands = [
             ("MMS_CHARGE", self.cmd_MMS_CHARGE),
-            ("MMS_CAREFUL_CHARGE", self.cmd_MMS_CAREFUL_CHARGE),
+            # ("MMS_CAREFUL_CHARGE", self.cmd_MMS_CAREFUL_CHARGE),
         ]
         gcode_adapter.bulk_register(commands)
 
@@ -373,7 +374,7 @@ class MMSCharge:
         self.log_info_s(f"{log_prefix} finish, result is '{result}'")
         return result
 
-    def _standard_charge(self, slot_num):
+    def _standard_charge_async(self, slot_num):
         log_prefix = f"slot[{slot_num}] standard charge"
         self.log_info_s(f"{log_prefix} begin")
         mms_slot = self.mms.get_mms_slot(slot_num)
@@ -479,7 +480,7 @@ class MMSCharge:
                     self._careful_charge(slot_num)
 
                     # Standard charge
-                    if self._standard_charge(slot_num):
+                    if self._standard_charge_async(slot_num):
                         self._handle_charge_success(slot_num)
                         return True
 
@@ -531,9 +532,9 @@ class MMSCharge:
 
                 # Sprint slowly
                 self.mms_delivery.mms_drive_sprint(
-                    slot_num, -self.charge_config.sprint_distance)
+                    slot_num, -self.sprint_distance)
                 self.mms_delivery.mms_drive_sprint(
-                    slot_num, self.charge_config.sprint_distance)
+                    slot_num, self.sprint_distance)
 
                 # Make sure buffer sprint is relaxed before extrude
                 self.mms_delivery.clear_buffer(slot_num)
@@ -541,8 +542,8 @@ class MMSCharge:
                 mms_drive = mms_slot.get_mms_drive()
                 with mms_drive.sync_with_extruder():
                     extruder_adapter.extrude(
-                        self.charge_config.fill_extrude_distance,
-                        self.charge_config.fill_extrude_speed
+                        self.fill_extrude_distance,
+                        self.fill_extrude_speed
                     )
 
                 self._handle_charge_success(slot_num)
@@ -558,99 +559,99 @@ class MMSCharge:
             gcode_adapter.respond_error("mms charge failed")
             return False
 
-    def _charged_confirm(self, slot_num):
-        # Prepare buffer
-        self.mms_delivery.fill_buffer(slot_num)
-        # Extrude a little
-        extruder_adapter.extrude(
-            self.charge_config.charge_confirm_distance,
-            self.charge_config.fill_extrude_speed
-        )
-        # Outlet would be released if charge is success
-        mms_slot = self.mms.get_mms_slot(slot_num)
-        return mms_slot.outlet.is_released()
+    # def _charged_confirm(self, slot_num):
+    #     # Prepare buffer
+    #     self.mms_delivery.fill_buffer(slot_num)
+    #     # Extrude a little
+    #     extruder_adapter.extrude(
+    #         self.charge_config.charge_confirm_distance,
+    #         self.fill_extrude_speed
+    #     )
+    #     # Outlet would be released if charge is success
+    #     mms_slot = self.mms.get_mms_slot(slot_num)
+    #     return mms_slot.outlet.is_released()
 
-    def mms_charge_t(self, slot_num):
-        self._exec_custom_macro(self.custom_before, "before")
+    # def mms_charge_t(self, slot_num):
+    #     self._exec_custom_macro(self.custom_before, "before")
 
-        if not self._safety_checks(slot_num):
-            return False
+    #     if not self._safety_checks(slot_num):
+    #         return False
 
-        self.log_info_s(f"slot[{slot_num}] mms charge begin")
-        try:
-            retry_times = self.mms.get_retry_times()
-            mms_slot = self.mms.get_mms_slot(slot_num)
+    #     self.log_info_s(f"slot[{slot_num}] mms charge begin")
+    #     try:
+    #         retry_times = self.mms.get_retry_times()
+    #         mms_slot = self.mms.get_mms_slot(slot_num)
 
-            # Make sure mms_buffer is idle
-            self._pause_mms_buffer(slot_num)
+    #         # Make sure mms_buffer is idle
+    #         self._pause_mms_buffer(slot_num)
 
-            with self._charge_is_running():
-                if self.mms_purge.is_enabled():
-                    # Park to tray point
-                    self.mms_purge.move_to_tray()
+    #         with self._charge_is_running():
+    #             if self.mms_purge.is_enabled():
+    #                 # Park to tray point
+    #                 self.mms_purge.move_to_tray()
 
-                # Skip wanted slot
-                self.mms_delivery.unload_loading_slots(
-                    skip_slot=slot_num)
+    #             # Skip wanted slot
+    #             self.mms_delivery.unload_loading_slots(
+    #                 skip_slot=slot_num)
 
-                for i in range(retry_times):
-                    # Load wanted slot
-                    if mms_slot.entry_is_set():
-                        self.mms_delivery.load_to_entry(slot_num)
-                    else:
-                        self.mms_delivery.load_to_outlet(slot_num)
+    #             for i in range(retry_times):
+    #                 # Load wanted slot
+    #                 if mms_slot.entry_is_set():
+    #                     self.mms_delivery.load_to_entry(slot_num)
+    #                 else:
+    #                     self.mms_delivery.load_to_outlet(slot_num)
 
-                    # Sprint slowly
-                    self.mms_delivery.mms_drive_sprint(
-                        slot_num, -self.charge_config.sprint_distance)
-                    self.mms_delivery.mms_drive_sprint(
-                        slot_num, self.charge_config.sprint_distance)
+    #                 # Sprint slowly
+    #                 self.mms_delivery.mms_drive_sprint(
+    #                     slot_num, -self.sprint_distance)
+    #                 self.mms_delivery.mms_drive_sprint(
+    #                     slot_num, self.sprint_distance)
 
-                    # Make sure buffer sprint is relaxed before extrude
-                    self.mms_delivery.clear_buffer(slot_num)
-                    # Extrude to charge
-                    mms_drive = mms_slot.get_mms_drive()
-                    with mms_drive.sync_with_extruder():
-                        extruder_adapter.extrude(
-                            self.charge_config.fill_extrude_distance,
-                            self.charge_config.fill_extrude_speed
-                        )
+    #                 # Make sure buffer sprint is relaxed before extrude
+    #                 self.mms_delivery.clear_buffer(slot_num)
+    #                 # Extrude to charge
+    #                 mms_drive = mms_slot.get_mms_drive()
+    #                 with mms_drive.sync_with_extruder():
+    #                     extruder_adapter.extrude(
+    #                         self.fill_extrude_distance,
+    #                         self.fill_extrude_speed
+    #                     )
 
-                    # Check
-                    if self._charged_confirm(slot_num):
-                        self._handle_charge_success(slot_num)
-                        return True
+    #                 # Check
+    #                 if self._charged_confirm(slot_num):
+    #                     self._handle_charge_success(slot_num)
+    #                     return True
 
-                    # Retry loop
-                    # Retract
-                    self.mms_delivery.clear_buffer(slot_num)
-                    with mms_drive.sync_with_extruder():
-                        extruder_adapter.retract(
-                            self.charge_config.fill_extrude_distance,
-                            self.charge_config.fill_extrude_speed
-                        )
-                    self.mms_delivery.mms_drive_sprint(
-                        slot_num, -self.charge_config.sprint_distance)
-                    self.log_info(
-                        f"slot[{slot_num}] mms charge "
-                        f"retry {i+1}/{retry_times} ..."
-                    )
+    #                 # Retry loop
+    #                 # Retract
+    #                 self.mms_delivery.clear_buffer(slot_num)
+    #                 with mms_drive.sync_with_extruder():
+    #                     extruder_adapter.retract(
+    #                         self.fill_extrude_distance,
+    #                         self.fill_extrude_speed
+    #                     )
+    #                 self.mms_delivery.mms_drive_sprint(
+    #                     slot_num, -self.sprint_distance)
+    #                 self.log_info(
+    #                     f"slot[{slot_num}] mms charge "
+    #                     f"retry {i+1}/{retry_times} ..."
+    #                 )
 
-                # Retry end, not success
-                raise ChargeFailedError(
-                    f"slot[{slot_num}] mms charge failed after all retries",
-                    mms_slot
-                )
+    #             # Retry end, not success
+    #             raise ChargeFailedError(
+    #                 f"slot[{slot_num}] mms charge failed after all retries",
+    #                 mms_slot
+    #             )
 
-        except ChargeFailedError as e:
-            self.log_warning(e)
-            gcode_adapter.respond_error("mms charge failed")
-            return False
-        except Exception as e:
-            # May receive DeliveryFailedError/DeliveryTerminateSignal
-            self.log_error(f"slot[{slot_num}] mms charge error: {e}")
-            gcode_adapter.respond_error("mms charge failed")
-            return False
+    #     except ChargeFailedError as e:
+    #         self.log_warning(e)
+    #         gcode_adapter.respond_error("mms charge failed")
+    #         return False
+    #     except Exception as e:
+    #         # May receive DeliveryFailedError/DeliveryTerminateSignal
+    #         self.log_error(f"slot[{slot_num}] mms charge error: {e}")
+    #         gcode_adapter.respond_error("mms charge failed")
+    #         return False
 
     def _handle_charge_success(self, slot_num):
         self._charged_slot_num = slot_num

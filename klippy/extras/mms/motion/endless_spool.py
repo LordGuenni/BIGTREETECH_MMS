@@ -180,7 +180,7 @@ class MMSEndlessSpool:
     def _pause_and_hint(self, slot_num):
         self._pause(slot_num)
         # No exception raise, activate led effect
-        self.mms.get_mms_slot().slot_led.activate_blinking()
+        self.mms.get_mms_slot(slot_num).slot_led.activate_blinking()
         self.log_info(self.es_config.get_hint(slot_num))
 
     def _pause_and_wait(self, slot_num):

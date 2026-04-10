@@ -40,7 +40,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0440"
+    version: str = "0.1.0446"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -330,6 +330,7 @@ class MMS:
             ("MMS_RFID_READ", self.cmd_MMS_RFID_READ),
             ("MMS_RFID_WRITE", self.cmd_MMS_RFID_WRITE),
             ("MMS_RFID_TRUNCATE", self.cmd_MMS_RFID_TRUNCATE),
+            ("MMS_RFID_RESET", self.cmd_MMS_RFID_RESET),
 
             # SLOT Meta
             ("MMS_SLOT_COLOR", self.cmd_MMS_SLOT_COLOR),
@@ -885,13 +886,20 @@ class MMS:
         } if self._is_connected else {}
 
     def log_status(self, silent=True):
+        # Log stepper status if needed
         self.log_status_stepper(silent=True)
 
+        # Version
         info = f"MMS Version: {self.mms_config.version}\n"
+        # Pins
         info += "Slot pins status:\n"
-        for slot in self.get_mms_slots():
-            info += slot.format_pins_status()
-        info += f"Charged SLOT: {self.mms_charge.get_charged_slot()}"
+        for mms_slot in self.get_mms_slots():
+            info += mms_slot.format_pins_status()
+        # Charged
+        info += f"Charged SLOT: {self.mms_charge.get_charged_slot()}\n"
+        # Deliver distance
+        for mms_slot in self.get_mms_slots():
+            info += mms_slot.format_deliver_distance()
 
         log_func = self.log_info_s if silent else self.log_info
         log_func(info)
@@ -914,6 +922,12 @@ class MMS:
                 "MMS Print Observer:\n"
                 f"{self.print_observer.get_status()}"
             )
+
+    def log_deliver_distance(self):
+        info = ""
+        for mms_slot in self.get_mms_slots():
+            info += mms_slot.format_deliver_distance()
+        self.log_info(info)
 
     # -- GCode commands --
     def cmd_MMS(self, gcmd):
@@ -992,6 +1006,15 @@ class MMS:
             return
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.slot_rfid.rfid_truncate()
+
+    def cmd_MMS_RFID_RESET(self, gcmd):
+        """
+        Usage:
+            MMS_RFID_RESET
+        """
+        for mms_slot in self.mms_slots:
+            mms_slot.slot_rfid.reset()
+        self.log_info("MMS RFID reset end")
 
     def cmd_MMS_SLOT_COLOR(self, gcmd):
         """
@@ -1090,33 +1113,7 @@ class MMS:
                 f"slot[{slot_num}] deliver distance in meta is truncated")
 
     def cmd_MMS_TEST(self, gcmd):
-        # return
-
-        def format(mcu_stepper):
-            return {
-                "name" : mcu_stepper.get_name(),
-
-                "oid" : mcu_stepper.get_oid(),
-                "step_dist" : mcu_stepper.get_step_dist(),
-                "rotation_distance" : mcu_stepper.get_rotation_distance()[0],
-                "steps_per_rotation" : mcu_stepper.get_rotation_distance()[1],
-
-                "commanded_position" : mcu_stepper.get_commanded_position(),
-                "mcu_position=step" : mcu_stepper.get_mcu_position(),
-            }
-
-        slot_num = 0
-        mms_slot = self.get_mms_slot(slot_num)
-        mms_drive = mms_slot.get_mms_drive()
-        m_mcu_stepper = mms_drive.get_mcu_stepper()
-        m_status = format(m_mcu_stepper)
-        self.log_info(json.dumps(m_status, indent=4))
-
-        exturder = toolhead_adapter.get_extruder()
-        e_stepper = exturder.extruder_stepper
-        e_mcu_stepper = e_stepper.stepper
-        e_status = format(e_mcu_stepper)
-        self.log_info(json.dumps(e_status, indent=4))
+        return
 
 
 def load_config(config):

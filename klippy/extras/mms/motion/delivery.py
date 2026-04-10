@@ -342,7 +342,7 @@ class MMSDelivery:
 
             # Retry
             self.pause(self.d_config.retry_period)
-            self.log_info(f"{msg} failed, retry {i+1}/{self.retry_times} ...")
+            self.log_info(f"{msg} retry {i+1}/{self.retry_times} ...")
 
         # Try overtravel detect and recover after selector is triggered
         if is_completed:
@@ -523,22 +523,71 @@ class MMSDelivery:
             f"accel: {accel} mm/s^2"
         )
 
-        # if from_meta:
-        #     return self.deliver_confidently(
-        #         slot_num, pin_type, forward, trigger,
-        #         distance, speed, accel
-        #     )
-        # else:
-        #     return self.deliver_with_retry(
-        #         slot_num, pin_type, forward, trigger,
-        #         distance, speed, accel
-        #     )
-        return self.deliver_with_retry(
-            slot_num, pin_type, forward, trigger,
-            distance, speed, accel
-        )
+        if from_meta and \
+            pin_type in (self.pin_type.outlet, self.pin_type.entry) and \
+            forward and trigger:
+            return self.deliver_confidently(
+                slot_num, pin_type, forward, trigger,
+                distance, speed, accel
+            )
+        else:
+            return self.deliver_with_retry(
+                slot_num, pin_type, forward, trigger,
+                distance, speed, accel
+            )
+        # return self.deliver_with_retry(
+        #     slot_num, pin_type, forward, trigger,
+        #     distance, speed, accel
+        # )
 
     def deliver_confidently(
+        self, slot_num, pin_type, forward, trigger,
+        distance, speed, accel
+    ):
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        mms_drive = mms_slot.get_mms_drive()
+        msg = self._format_deliver_msg(
+            slot_num, pin_type, forward, trigger)
+
+        # Check destination pin state
+        if mms_slot.check_pin(pin_type, trigger):
+            self.log_info_s(f"{msg} is already done, skip...")
+            return True
+
+        # Filament run out?
+        self.log_info_s(
+            f"slof[{slot_num}] deliver confidently: {distance:.2f}mm")
+        self._deliver_distance(slot_num, distance, speed, accel)
+
+        # sprint_dist = self.pd_config.safety_retract_distance
+        distance_moved = distance
+
+        self.log_info_s(f"{msg} gentle homing")
+        for i in range(self.retry_times):
+            result = self._drive_deliver_to(
+                slot_num, pin_type, forward, trigger,
+                distance,
+                self.d_config.sprint_speed,
+                self.d_config.sprint_speed
+            )
+
+            distance_moved += mms_drive.get_distance_moved()
+
+            if mms_drive.move_is_completed(result):
+                if i>0:
+                    self.log_info(
+                        f"{msg} complete, moved: {distance_moved:.2f} mm")
+                return True
+
+            # Retry
+            self.pause(self.d_config.retry_period)
+            self.log_info(f"{msg} gentle retry {i+1}/{self.retry_times} ...")
+
+        # Finally not return, raise exception
+        raise DeliveryFailedError(
+            f"{msg} gentle failed after full movement", mms_slot)
+
+    def deliver_confidently_org(
         self, slot_num, pin_type, forward, trigger,
         distance, speed, accel
     ):
@@ -622,12 +671,15 @@ class MMSDelivery:
                             f"{msg} distance saved: "
                             f"{distance_moved_sum:.2f} mm"
                         )
+                # Log if retried
+                if i>0:
+                    self.log_info(
+                        f"{msg} complete, moved: {distance_moved_sum:.2f} mm")
                 return True
 
             # Retry
             self.pause(self.d_config.retry_period)
-            self.log_info(
-                f"{msg} failed, retry {i+1}/{self.retry_times} ...")
+            self.log_info(f"{msg} retry {i+1}/{self.retry_times} ...")
 
         # Failed after all retry
         # Reset distance_moved to 0
@@ -1289,6 +1341,8 @@ class MMSDelivery:
         spd = self.d_config.walk_speed
         acc = self.d_config.walk_accel
 
+        file_need_truncated = True
+
         self.log_info("mms bowden calibration begin")
         for slot_num in self.mms.get_slot_nums():
             try:
@@ -1297,10 +1351,16 @@ class MMSDelivery:
                 mms_slot = self.mms.get_mms_slot(slot_num)
                 mms_drive = mms_slot.get_mms_drive()
 
+                # Truncate file at lease once
+                if file_need_truncated:
+                    mms_slot.meta.truncate_file()
+                    file_need_truncated = False
+
                 # Prepare before
                 self.unload_loading_slots()
-                self.load_to_gate(slot_num)
+                # self.load_to_gate(slot_num)
                 self.unload_to_gate(slot_num)
+                self.load_to_gate(slot_num)
 
                 # Start
                 if mms_slot.entry_is_set():
@@ -1316,11 +1376,15 @@ class MMSDelivery:
                     # cause unload_to_gate() in prepare phase
                     # has actually played
                     self._load_to_trigger(
-                        slot_num, first_p, speed=spd, accel=acc)
+                        slot_num, first_p,
+                        speed=spd, accel=acc
+                    )
 
                     # Pin: Gate Backward
                     self._unload_to_release(
-                        slot_num, self.pin_type.gate, speed=spd, accel=acc)
+                        slot_num, self.pin_type.gate,
+                        speed=spd, accel=acc
+                    )
 
                     self._safety_retract(slot_num)
 
@@ -1341,7 +1405,8 @@ class MMSDelivery:
 
             except DeliveryReadyError:
                 # Keep on next SLOT
-                pass
+                self.log_info(
+                    f"slot[{slot_num}] is not ready, calibration skip...")
             except DeliveryTerminateSignal:
                 self.log_info("mms bowden calibration terminated")
                 return False
@@ -1351,25 +1416,28 @@ class MMSDelivery:
 
         self.unselect()
         self.log_info("mms bowden calibration finish")
+        self.mms.log_deliver_distance()
         return True
 
     def verify_pins(self, mms_slot, loaded):
         trigger = loaded
+        slot_num = mms_slot.get_num()
         if not mms_slot.inlet.is_triggered():
-            raise Exception("Inlet")
+            raise Exception(f"slot[{slot_num}] Inlet")
         if (mms_slot.gate.is_triggered() != trigger):
-            raise Exception("Gate")
+            raise Exception(f"slot[{slot_num}] Gate")
         if (mms_slot.buffer_runout.is_triggered() == trigger):
-            raise Exception("Buffer_runout: PA4")
+            raise Exception(f"slot[{slot_num}] Buffer_runout: PA4")
         if (mms_slot.outlet.is_triggered() != trigger):
-            raise Exception("Outlet: PA5")
+            raise Exception(f"slot[{slot_num}] Outlet: PA5")
         if mms_slot.entry_is_set() \
             and (mms_slot.entry_is_triggered() != trigger):
-            raise Exception("Entry")
-        rfid = mms_slot.slot_rfid
-        if rfid.enable and rfid.mms_rfid.is_detecting:
-            rfid.mms_rfid.detect_end()
-            raise Exception("RFID")
+            raise Exception(f"slot[{slot_num}] Entry")
+
+    def verify_rfid(self, mms_slot):
+        tag_uid = mms_slot.slot_rfid.get_tag_uid()
+        if not tag_uid:
+            raise Exception(f"slot[{mms_slot.get_num()}] RFID")
 
     def mms_slots_check(self):
         self.log_info("slots check begin")
@@ -1378,24 +1446,73 @@ class MMSDelivery:
             if not self._can_walk():
                 return False
 
-            try:
-                mms_slot = self.mms.get_mms_slot(slot_num)
+            mms_slot = self.mms.get_mms_slot(slot_num)
+            tag_uid = None
 
+            try:
+                # Unload release all pins except Inlet
                 self.unload_loading_slots()
                 self.pause(1)
-                self.log_info("unload: " + mms_slot.format_pins_status())
+                self.log_info(
+                    "unload: " + mms_slot.format_pins_status())
+                # Verify
                 self.verify_pins(mms_slot, False)
 
-                rfid = mms_slot.slot_rfid
-                if rfid.enable:
-                    rfid.mms_rfid.detect_begin(
-                        callback=rfid.mms_rfid._handle_detected)
-                self.load_to_outlet(slot_num)
-                if mms_slot.entry_is_set() \
-                    and not mms_slot.entry_is_triggered():
-                    self.load_to_entry(slot_num)
-                self.log_info("load: " + mms_slot.format_pins_status())
-                self.verify_pins(mms_slot, True)
+                tag_uid = mms_slot.slot_rfid.detect_tag()
+                if tag_uid:
+                    # Tag UID is not None, retract nearby slot_pairs
+                    slot_nums = self.mms.get_slot_nums()
+                    i = slot_nums.index(slot_num)
+                    offset = (i // 2) * 2
+                    pairs = slot_nums[offset:offset+2]
+
+                    # Retract until no tag can be detected
+                    for i in range(self.retry_times):
+                        for s_num in pairs:
+                            self.log_info(
+                                f"slot[{s_num}] retract to free RFID tag")
+                            self._safety_retract(s_num)
+                            # Detect again
+                            tag_uid = mms_slot.slot_rfid.detect_tag()
+                            if not tag_uid:
+                                break
+
+                        if not tag_uid:
+                            break
+
+                if tag_uid:
+                    self.log_warning(
+                        f"slot[{slot_num}] has already detected "
+                        f"RFID tag: {tag_uid}"
+                    )
+
+                # Load to check pins and RFID detection
+                for i in range(self.retry_times):
+                    with mms_slot.slot_rfid.detect_only():
+                        # Trigger all Entry and Outlet
+                        if mms_slot.entry_is_set() \
+                            and not mms_slot.entry_is_triggered():
+                            self.load_to_entry(slot_num)
+                        self.load_to_outlet(slot_num)
+                        self.log_info(
+                            "load: " + mms_slot.format_pins_status())
+                        # Verify
+                        self.verify_pins(mms_slot, True)
+
+                    tag_uid = mms_slot.slot_rfid.get_tag_uid()
+                    if tag_uid:
+                        # Tag has been detected, exit retry
+                        break
+                    self.log_info(
+                        f"slot[{slot_num}] no RFID tag detected, "
+                        f"retry {i+1}/{self.retry_times} ..."
+                    )
+                    # Context manager is exit, detect has been teardown
+                    # Unload to Gate and retry
+                    self.unload_to_gate(slot_num)
+
+                # Raise Exception if RFID is still detecting
+                self.verify_rfid(mms_slot)
 
             except DeliveryTerminateSignal:
                 self.log_info("slots check terminated")
@@ -1403,7 +1520,9 @@ class MMSDelivery:
             except DeliveryReadyError:
                 pass
             except Exception as e:
-                self.log_error(f"slots check error:{e}")
+                msg = f"slots check error: {e}"
+                self.log_error(msg)
+                gcode_adapter.respond_error(msg)
                 return False
 
         # Finally unload

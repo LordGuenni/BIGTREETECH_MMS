@@ -1,6 +1,6 @@
 # Support for MMS SLOT RFID
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -91,7 +91,7 @@ class SlotRFID:
         result = "success" if success else "failed"
         self.log_info(f"SLOT[{self.slot_num}] RFID write {result}")
 
-    # ---- Detect Duration ----
+    # ---- Detect ----
     def rfid_detect_begin(self):
         if self._is_detecting:
             self.log_warning(
@@ -101,8 +101,12 @@ class SlotRFID:
 
         self._is_detecting = True
         self.detect_begin_at = time.time()
+        self.mms_rfid.set_duration(self.detect_duration)
         self.mms_rfid.detect_begin(callback=self._handle_detected)
-        self.log_info_s(f"slot[{self.slot_num}] RFID detect begin")
+        self.log_info_s(
+            f"slot[{self.slot_num}] RFID detect begin, "
+            f"duration: {self.detect_duration}"
+        )
 
     def rfid_detect_end(self):
         if not self._is_detecting:
@@ -129,11 +133,66 @@ class SlotRFID:
             if success:
                 self.rfid_read_begin()
 
-        elif time.time()-self.detect_begin_at > self.detect_duration:
+        elif self._detect_is_timeout():
             self.rfid_detect_end()
             self.log_info_s(f"slot[{self.slot_num}] RFID detect timeout")
 
-    # ---- Read Duration ----
+    def _detect_is_timeout(self):
+        return time.time()-self.detect_begin_at > self.detect_duration
+
+    def is_detecting(self):
+        return self._is_detecting
+
+    def detect_only_begin(self):
+        if self._is_detecting:
+            self.log_warning(
+                f"slot[{self.slot_num}] RFID is already only detecting")
+            return
+
+        self._is_detecting = True
+        self._initialize_tag()
+        self.detect_begin_at = time.time()
+
+        self.mms_rfid.set_duration(self.detect_duration)
+        self.mms_rfid.detect_begin(callback=self._handle_detected_only)
+        self.log_info_s(
+            f"slot[{self.slot_num}] RFID only detect begin, "
+            f"duration: {self.detect_duration}"
+        )
+
+    def detect_only_end(self):
+        if not self._is_detecting:
+            self.log_warning(
+                f"slot[{self.slot_num}] RFID is not only detecting")
+            return False
+
+        self.mms_rfid.detect_end()
+        self._is_detecting = False
+        self.detect_end_at = time.time()
+        self.log_info_s(
+            f"slot[{self.slot_num}] RFID only detect end")
+        return True
+
+    def _handle_detected_only(self, data):
+        if data:
+            self.rfid_detect_end()
+            self.tag_uid = data
+            self.log_info(
+                f"slot[{self.slot_num}] RFID only detect data: {data}")
+
+        elif self._detect_is_timeout():
+            self.detect_only_end()
+            self.log_info_s(
+                f"slot[{self.slot_num}] RFID only detect timeout")
+
+    def detect_tag(self):
+        # Return tag UID or None
+        return self.mms_rfid.rfid_manager.get_uid()
+
+    def get_tag_uid(self):
+        return self.tag_uid
+
+    # ---- Read ----
     def rfid_read_begin(self):
         if self._is_reading:
             self.log_warning(
@@ -147,8 +206,12 @@ class SlotRFID:
 
         self._is_reading = True
         self.read_begin_at = time.time()
+        self.mms_rfid.set_duration(self.read_duration)
         self.mms_rfid.read_begin(callback=self._handle_read)
-        self.log_info_s(f"slot[{self.slot_num}] RFID read begin")
+        self.log_info_s(
+            f"slot[{self.slot_num}] RFID read begin, "
+            f"duration: {self.read_duration}"
+        )
 
         # Activate LED effect
         self.mms_slot.slot_led.activate_marquee()
@@ -203,8 +266,37 @@ class SlotRFID:
                 if self._is_reading:
                     self.rfid_read_end()
 
+    @contextmanager
+    def detect_only(self):
+        if self.enable:
+            self.detect_only_begin()
+        try:
+            yield
+        finally:
+            if self.enable and self._is_detecting:
+                self.detect_only_end()
+
     # ---- Truncate ----
     def rfid_truncate(self):
         self._initialize_tag()
+
+    # ---- Reset ----
+    def reset(self):
+        if self._is_detecting:
+            if not self.detect_only_end():
+                self.detect_end()
+        if self._is_reading:
+            self.read_end()
+
+        if self.mms_rfid.is_detecting():
+            self.mms_rfid.detect_end()
+        if self.mms_rfid.is_reading():
+            self.mms_rfid.read_end()
+
+        try:
+            self.mms_rfid.rfid_manager.handler.pcd_reset()
+            self.log_info(f"slot[{self.slot_num}] RFID reset done")
+        except Exception as e:
+            self.log_error(f"slot[{self.slot_num}] RFID reset failed")
 
     # ---- Erase ----

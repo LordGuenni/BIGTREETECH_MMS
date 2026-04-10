@@ -44,7 +44,7 @@ class PrinterPurgeConfig(PrinterConfig):
 
     # Extruder speed during filament purging
     # Unit: mm/min
-    purge_speed: float = 600.0
+    purge_speed: float = 300.0
 
     # Length of orphan filament to be purged
     #     | | Extruder | |
@@ -69,25 +69,25 @@ class PrinterPurgeConfig(PrinterConfig):
     # Unit: mm/min
     retract_speed: float = 10000.0
 
-    # Priming distance
-    # Unit: mm
-    nozzle_priming_dist: float = 20.0
-    # Priming speed
-    # Unit: mm/min
-    nozzle_priming_speed: float = 600.0
+    # # Priming distance
+    # # Unit: mm
+    # nozzle_priming_dist: float = 20.0
+    # # Priming speed
+    # # Unit: mm/min
+    # nozzle_priming_speed: float = 600.0
 
-    # Pressure pulse cleaning
-    # 0 = disable, 1 = enable
-    pulse_clean_enable: int = 0
-    # Unit: second
-    pulse_rest_time: float = 0.1
-    pulse_count: int = 4
-    # Unit: mm/min
-    pulse_speed: float = 1200
-    # Unit: mm
-    retract_dist: float = 10
-    # Unit: mm
-    extrude_dist: float = retract_dist * 0.5
+    # # Pressure pulse cleaning
+    # # 0 = disable, 1 = enable
+    # pulse_clean_enable: int = 0
+    # # Unit: second
+    # pulse_rest_time: float = 0.1
+    # pulse_count: int = 4
+    # # Unit: mm/min
+    # pulse_speed: float = 1200
+    # # Unit: mm
+    # retract_dist: float = 10
+    # # Unit: mm
+    # extrude_dist: float = retract_dist * 0.5
 
     # Tray
     # Order to process axis from tray_point.
@@ -294,85 +294,81 @@ class MMSPurge:
         return True
 
     # ---- Toolhead Control ----
-    def pressure_pulse_cleaning(self, slot_num):
-        if self.pulse_clean_enable == 0:
-            return
+    # def pressure_pulse_cleaning(self, slot_num):
+    #     if self.pulse_clean_enable == 0:
+    #         return
 
-        log_prefix = f"slot[{slot_num}] pressure pulse cleaning"
+    #     log_prefix = f"slot[{slot_num}] pressure pulse cleaning"
 
-        # Clear buffer volume
-        mms_buffer = self._pause_mms_buffer(slot_num)
-        if not mms_buffer.clear(slot_num):
-            raise PurgeFailedError(
-                f"{log_prefix} failed, mms_buffer is not clear",
-                self.mms.get_mms_slot(slot_num)
-            )
+    #     # Clear buffer volume
+    #     mms_buffer = self._pause_mms_buffer(slot_num)
+    #     if not mms_buffer.clear(slot_num):
+    #         raise PurgeFailedError(
+    #             f"{log_prefix} failed, mms_buffer is not clear",
+    #             self.mms.get_mms_slot(slot_num)
+    #         )
 
-        # Calculate
-        # Extruder params
-        # If retracted_dist <= 0 ?
-        retracted_dist = self.retract_dist - self.extrude_dist
-        total_retracted_dist = retracted_dist * self.pulse_count
-        # Drive stepper params
-        unload_dist = total_retracted_dist - mms_buffer.get_spring_stroke()
-        # Unit: pulse_speed::mm/min -> unload_speed::mm/s
-        unload_speed = extruder_adapter.transform_speed(
-            self.pulse_speed) * 0.5
+    #     # Calculate
+    #     # Extruder params
+    #     # If retracted_dist <= 0 ?
+    #     retracted_dist = self.retract_dist - self.extrude_dist
+    #     total_retracted_dist = retracted_dist * self.pulse_count
+    #     # Drive stepper params
+    #     unload_dist = total_retracted_dist - mms_buffer.get_spring_stroke()
+    #     # Unit: pulse_speed::mm/min -> unload_speed::mm/s
+    #     unload_speed = extruder_adapter.transform_speed(
+    #         self.pulse_speed) * 0.5
 
-        self.log_info_s(f"{log_prefix} begin")
+    #     self.log_info_s(f"{log_prefix} begin")
 
-        # Startup async unload first
-        self._async_move_backward(slot_num, unload_dist, unload_speed)
-        for i in range(self.pulse_count):
-            # Retract
-            extruder_adapter.retract(self.retract_dist, self.pulse_speed)
-            toolhead_adapter.dwell(self.pulse_rest_time)
-            # Extrude
-            extruder_adapter.extrude(self.extrude_dist, self.pulse_speed)
-            toolhead_adapter.dwell(self.pulse_rest_time)
+    #     # Startup async unload first
+    #     self._async_move_backward(slot_num, unload_dist, unload_speed)
+    #     for i in range(self.pulse_count):
+    #         # Retract
+    #         extruder_adapter.retract(self.retract_dist, self.pulse_speed)
+    #         toolhead_adapter.dwell(self.pulse_rest_time)
+    #         # Extrude
+    #         extruder_adapter.extrude(self.extrude_dist, self.pulse_speed)
+    #         toolhead_adapter.dwell(self.pulse_rest_time)
 
-        # Finally wait idle
-        self.mms_delivery.wait_mms_selector_and_drive(slot_num)
-        self.log_info_s(
-            f"{log_prefix} finish"
-            f", total retracted: {total_retracted_dist:.2f} mm"
-        )
+    #     # Finally wait idle
+    #     self.mms_delivery.wait_mms_selector_and_drive(slot_num)
+    #     self.log_info_s(
+    #         f"{log_prefix} finish"
+    #         f", total retracted: {total_retracted_dist:.2f} mm"
+    #     )
 
-    def _apply_nozzle_priming(self, slot_num):
-        """Prime nozzle after filament change."""
-        mms_buffer = self._pause_mms_buffer(slot_num)
+    # def _apply_nozzle_priming(self, slot_num):
+    #     """Prime nozzle after filament change."""
+    #     mms_buffer = self._pause_mms_buffer(slot_num)
 
-        log_prefix = f"slot[{slot_num}] purge with nozzle priming only"
-        self.log_info_s(f"{log_prefix} begin")
+    #     log_prefix = f"slot[{slot_num}] purge with nozzle priming only"
+    #     self.log_info_s(f"{log_prefix} begin")
 
-        # Make sure buffer is halfway
-        if not mms_buffer.halfway(slot_num):
-            raise PurgeFailedError(
-                f"{log_prefix} failed, mms_buffer is not halfway",
-                self.mms.get_mms_slot(slot_num)
-            )
+    #     # Make sure buffer is halfway
+    #     if not mms_buffer.halfway(slot_num):
+    #         raise PurgeFailedError(
+    #             f"{log_prefix} failed, mms_buffer is not halfway",
+    #             self.mms.get_mms_slot(slot_num)
+    #         )
 
-        # distance = min(
-        #     abs(self.nozzle_priming_dist),
-        #     mms_buffer.get_spring_stroke()
-        # )
-        distance = abs(self.nozzle_priming_dist)
-        move_speed = extruder_adapter.transform_speed(
-            self.nozzle_priming_speed)
-        move_time = distance / move_speed
+    #     distance = abs(self.nozzle_priming_dist)
+    #     move_speed = extruder_adapter.transform_speed(
+    #         self.nozzle_priming_speed)
+    #     move_time = distance / move_speed
 
-        self._async_move_forward(slot_num, distance, move_speed)
-        extruder_adapter.extrude(distance, self.nozzle_priming_speed)
-        self.log_info_s(f"{log_prefix}, distance: {distance} mm")
+    #     self._async_move_forward(slot_num, distance, move_speed)
+    #     extruder_adapter.extrude(distance, self.nozzle_priming_speed)
+    #     self.log_info_s(f"{log_prefix}, distance: {distance} mm")
 
-        # Wait async task finish
-        self.mms_delivery.wait_mms_selector_and_drive(
-            slot_num=slot_num, timeout=move_time+5)
+    #     # Wait async task finish
+    #     self.mms_delivery.wait_mms_selector_and_drive(
+    #         slot_num=slot_num, timeout=move_time+5)
 
-        # Reduces underextrusion after retraction
-        # toolhead_adapter.release_pressure()
+    #     # Reduces underextrusion after retraction
+    #     # toolhead_adapter.release_pressure()
 
-        self.log_info_s(f"{log_prefix} finish")
+    #     self.log_info_s(f"{log_prefix} finish")
 
     def apply_retraction_compensation(self, slot_num):
         """Extruder retract a little bit to decrease nozzle remain."""
@@ -561,7 +557,13 @@ class MMSPurge:
                 if self.is_enabled():
                     self._standard_purge(slot_num)
                 else:
-                    self._apply_nozzle_priming(slot_num)
+                    # self._apply_nozzle_priming(slot_num)
+                    # Wait a while to solidify filament
+                    with toolhead_adapter.fan_cooldown(
+                            speed=self.fan_cooldown_speed,
+                            wait=self.fan_cooldown_wait
+                        ):
+                        self.apply_retraction_compensation(slot_num)
 
             except PurgeFailedError as e:
                 self.log_warning(f"{log_prefix} failed: {e}")
@@ -624,18 +626,33 @@ class MMSPurge:
                     self.tray_eject()
 
                 else:
-                    self.log_info_s(f"slot[{slot_num}] apply nozzle priming")
+                    # Wait a while to solidify filament
+                    with toolhead_adapter.fan_cooldown(
+                            speed = self.fan_cooldown_speed,
+                            wait = self.fan_cooldown_wait
+                        ):
+                        # Retraction compensation
+                        distance = abs(self.retraction_compensation)
+                        with mms_drive.sync_with_extruder():
+                            extruder_adapter.retract(
+                                distance, self.retract_speed)
+                        self.log_info_s(
+                            f"slot[{slot_num}] apply retraction compensation,"
+                            f" distance: {distance} mm"
+                        )
+
+                    # self.log_info_s(f"slot[{slot_num}] apply nozzle priming")
 
                     # Make sure buffer sprint is relaxed
-                    self.mms_delivery.clear_buffer(slot_num)
+                    # self.mms_delivery.clear_buffer(slot_num)
 
-                    distance = abs(self.nozzle_priming_dist)
-                    with mms_drive.sync_with_extruder():
-                        extruder_adapter.extrude(
-                            distance, self.nozzle_priming_speed)
+                    # distance = abs(self.nozzle_priming_dist)
+                    # with mms_drive.sync_with_extruder():
+                    #     extruder_adapter.extrude(
+                    #         distance, self.nozzle_priming_speed)
 
-                    self.log_info_s(
-                        f"slot[{slot_num}] extrude distance: {distance} mm")
+                    # self.log_info_s(
+                    #     f"slot[{slot_num}] extrude distance: {distance} mm")
 
             msg = f"{log_prefix} finish"
             gcode_adapter.respond_echo(msg)

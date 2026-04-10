@@ -47,7 +47,7 @@ class SlotFilamentMeta:
 
 @dataclass
 class DeliverDistance:
-    scale_factor: float = 0.001      # 1+0.001=100.1%
+    # scale_factor: float = 1.0      # 1=100%
     # distance_window: Optional[List] = field(default_factory=list)
     deliver_distance: float = 0.0 # in mm
 
@@ -105,15 +105,9 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
                 "filament_color" : self.filament_color,
                 "filament_material" : self.filament_material,
 
-                # "drive_forward" : round(
-                #     self.drive_forward.deliver_distance, 2
-                # ) if self.drive_forward else None,
-                # "drive_backward" : round(
-                #     self.drive_backward.deliver_distance, 2
-                # ) if self.drive_backward else None,
                 "deliver_vector": {
                     f"{pin}_{'forward' if direction else 'backward'}" : {
-                        "scale_factor": dist.scale_factor,
+                        # "scale_factor": dist.scale_factor,
                         "deliver_distance": round(dist.deliver_distance, 2)
                     }
                     for (pin,direction),dist in self.deliver_vector.items()
@@ -122,16 +116,12 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
         except Exception as e:
             return {}
 
-    def _cal_distance(self, deliver_distance, scale_factor):
-        return round(deliver_distance * (1 + scale_factor), 2)
-
     def get_deliver_distance(self, pin_type, forward):
         key = (pin_type, forward)
         d_dist = self.deliver_vector.get(key)
         if d_dist and d_dist.deliver_distance:
             # Return cached data
-            return self._cal_distance(
-                d_dist.deliver_distance, d_dist.scale_factor)
+            return d_dist.deliver_distance
 
         # New key, read from file
         full_path, data = self.read_file()
@@ -143,14 +133,11 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
                 get(f"{pin_type}_{f_str}")
 
             if d_dist:
-                scale_factor = d_dist.get("scale_factor")
                 deliver_distance = d_dist.get("deliver_distance")
-
-                if scale_factor and deliver_distance:
+                if deliver_distance:
                     self.set_deliver_distance(
                         pin_type, forward, deliver_distance)
-                    return self._cal_distance(
-                        deliver_distance, scale_factor)
+                    return deliver_distance
 
         return None
 
@@ -160,8 +147,7 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
         if self.deliver_vector.get(key):
             self.deliver_vector[key].deliver_distance = dist
         else:
-            d_dist = DeliverDistance(
-                deliver_distance=dist, scale_factor=0.001)
+            d_dist = DeliverDistance(deliver_distance=dist)
             self.deliver_vector[key] = d_dist
 
     def truncate_deliver_distance(self):
@@ -217,10 +203,7 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
 
         return full_path, data
 
-    def write_file(self):
-        # reactor.register_timer(
-        #     self._delayed_write, reactor.monotonic() + 1.0)
-
+    def _create_file(self):
         full_path = self._find_full_path()
         if not full_path:
             base_dir = os.path.dirname(self.cfg_path)
@@ -229,13 +212,39 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
         try:
             # Create if not exists
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-            _, data = self.read_file()
-
         except Exception as e:
-            self.log_error(
-                f"read before write failed '{full_path}': {e}")
-            data = {}
+            self.log_error(f"create file error '{full_path}': {e}")
+            return None
+
+        return full_path
+
+    def _atomic_write_file(self, full_path, data):
+        if not full_path:
+            return False
+
+        # Atomic write
+        tmp_path = full_path + ".tmp"
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            os.replace(tmp_path, full_path)
+        except Exception as e:
+            self.log_error(f"write file error '{full_path}': {e}")
+            return False
+
+        return True
+
+    def write_file(self):
+        # reactor.register_timer(
+        #     self._delayed_write, reactor.monotonic() + 1.0)
+
+        full_path = self._create_file()
+        if not full_path:
+            self.log_error(f"write file error '{full_path}'")
+            return False
+
+        # Read exists data
+        _, data = self.read_file()
 
         slot_key = str(self.num)
         if slot_key not in data:
@@ -252,17 +261,16 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
 
             dv[key] = {
                 "deliver_distance": obj.deliver_distance,
-                "scale_factor": getattr(obj, "scale_factor", 0.001)
+                # "scale_factor": getattr(obj, "scale_factor", 0.001)
             }
 
-        # Atomic write
-        tmp_path = full_path + ".tmp"
-        try:
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-            os.replace(tmp_path, full_path)
-        except Exception as e:
-            self.log_error(f"write file error '{full_path}': {e}")
+        return self._atomic_write_file(full_path, data)
+
+    def truncate_file(self):
+        full_path = self._create_file()
+        if not full_path:
+            self.log_error(f"write file error '{full_path}'")
             return False
 
-        return True
+        # Write file with empty dict
+        return self._atomic_write_file(full_path, {})

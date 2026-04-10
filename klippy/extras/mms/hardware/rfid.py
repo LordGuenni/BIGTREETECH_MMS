@@ -1,6 +1,6 @@
 # Support for MMS RFID Reader: mfrc522
 #
-# Copyright (C) 2024-2025 Garvey Ding <garveyding@gmail.com>
+# Copyright (C) 2024-2026 Garvey Ding <garveyding@gmail.com>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
@@ -358,8 +358,8 @@ class MMSRfid:
             cs_active_high=False)
 
         self.name = config.get_name().split()[-1]
-        self.is_detecting = False
-        self.is_reading = False
+        self._is_detecting = False
+        self._is_reading = False
 
         self.rfid_config = RFIDConfig(config)
         # Parse params
@@ -390,7 +390,7 @@ class MMSRfid:
         self.log_info = mms_logger.create_log_info(console_output=True)
         self.log_warning = mms_logger.create_log_warning()
         self.log_error = mms_logger.create_log_error()
-        self.log_info_s = mms_logger.create_log_info(console_output=True)
+        self.log_info_s = mms_logger.create_log_info(console_output=False)
 
     def _initialize_gcode(self):
         gcode_adapter.register_mux(
@@ -421,6 +421,9 @@ class MMSRfid:
 
     def _initialize_manager(self):
         self.rfid_manager = RFIDManager(self.spi)
+
+    def set_duration(self, duration):
+        self.periodic_task.set_timeout(duration)
 
     # ---- Tag write ----
     def _load_rfid_file(self):
@@ -493,41 +496,58 @@ class MMSRfid:
 
     # ---- Tag detect ----
     def detect_begin(self, callback):
-        func = self.rfid_manager.get_uid
+        if self._is_detecting:
+            self.log_warning(
+                f"RFID[{self.name}] detect is already running")
+            return False
 
         try:
             is_ready = self.periodic_task.schedule(
-                func=func, callback=callback
+                func=self.rfid_manager.get_uid,
+                callback=callback,
+                timeout_callback=self._handle_detect_timeout
             )
-            if is_ready:
-                ret = self.periodic_task.start()
-                if ret:
-                    self.is_detecting = True
-                    self.log_info(
-                        f"RFID[{self.name}] detect initiated in the backend"
-                    )
-                else:
-                    self.log_error(f"RFID[{self.name}] detect begin failed")
-            else:
-                self.log_warning(f"RFID[{self.name}] detect is already running")
+            if not is_ready:
+                self.log_warning(
+                    f"RFID[{self.name}] detect schedule failed")
+                return False
+
+            ret = self.periodic_task.start()
+            if not ret:
+                self.log_error(
+                    f"RFID[{self.name}] detect begin failed")
+                return False
+
+            self._is_detecting = True
+            self.log_info_s(
+                f"RFID[{self.name}] detect initiated in the backend")
+            return True
+
         except Exception as e:
             self.log_error(f"RFID[{self.name}] detect_begin error:{e}")
 
     def detect_end(self):
+        if not self._is_detecting:
+            self.log_warning(
+                f"RFID[{self.name}] detect is not running")
+            return False
+
         try:
             ret = self.periodic_task.stop()
-            if ret:
-                self.is_detecting = False
-                self.log_info(
-                    f"RFID[{self.name}] detect terminated in the backend"
-                )
-            else:
-                self.log_warning(f"RFID[{self.name}] detect is not running")
-            return ret
+            if not ret:
+                self.log_warning(
+                    f"RFID[{self.name}] detect stop failed")
+                return False
+
+            self._is_detecting = False
+            self.log_info_s(
+                f"RFID[{self.name}] detect terminated in the backend")
+            return True
+
         except Exception as e:
             self.log_error(f"RFID[{self.name}] detect_end error:{e}")
 
-    def _handle_detected(self, data):
+    def handle_detected(self, data):
         if data and self.detect_end():
             uid = self.rfid_manager.to_string(block_data=data)
             self.log_info(
@@ -535,40 +555,62 @@ class MMSRfid:
                 f"{uid}"
             )
 
+    def _handle_detect_timeout(self):
+        self.log_info(f"RFID[{self.name}] detect timeout")
+        self._is_detecting = False
+
+    def is_detecting(self):
+        return self._is_detecting
+
     # ---- Tag read ----
     def read_begin(self, callback):
-        func = self.rfid_manager.rfid_read
+        if self._is_reading:
+            self.log_warning(
+                f"RFID[{self.name}] read is already running")
+            return False
 
         try:
             is_ready = self.periodic_task.schedule(
-                func=func, callback=callback
+                func=self.rfid_manager.rfid_read,
+                callback=callback,
+                timeout_callback=self._handle_read_timeout
             )
-            if is_ready:
-                ret = self.periodic_task.start()
-                if ret:
-                    self.is_reading = True
-                    self.log_info(
-                        f"RFID[{self.name}] read initiated in the backend"
-                    )
-                else:
-                    self.log_error(f"RFID[{self.name}] read begin failed")
-            else:
-                self.log_warning(f"RFID[{self.name}] read is already running")
+            if not is_ready:
+                self.log_warning(
+                    f"RFID[{self.name}] read schedule failed")
+                return False
+
+            ret = self.periodic_task.start()
+            if not ret:
+                self.log_error(
+                    f"RFID[{self.name}] read begin failed")
+                return False
+
+            self._is_reading = True
+            self.log_info(
+                f"RFID[{self.name}] read initiated in the backend")
 
         except Exception as e:
             self.log_error(f"RFID[{self.name}] read_begin error:{e}")
 
     def read_end(self):
+        if not self._is_reading:
+            self.log_warning(
+                f"RFID[{self.name}] read is not running")
+            return False
+
         try:
             ret = self.periodic_task.stop()
-            if ret:
-                self.is_reading = False
-                self.log_info(
-                    f"RFID[{self.name}] read terminated in the backend"
-                )
-            else:
-                self.log_warning(f"RFID[{self.name}] read is not running")
-            return ret
+            if not ret:
+                self.log_warning(
+                    f"RFID[{self.name}] read stop failed")
+                return False
+
+            self._is_reading = False
+            self.log_info(
+                f"RFID[{self.name}] read terminated in the backend")
+            return True
+
         except Exception as e:
             self.log_error(f"RFID[{self.name}] read_end error:{e}")
 
@@ -579,14 +621,21 @@ class MMSRfid:
                 f"{data}"
             )
 
+    def _handle_read_timeout(self):
+        self.log_info(f"RFID[{self.name}] read timeout")
+        self._is_reading = False
+
+    def is_reading(self):
+        return self._is_reading
+
     # ---- Dev ----
     def get_tags_begin(self, callback):
         func = self.rfid_manager.get_tags
 
         try:
             is_ready = self.periodic_task.schedule(
-                func=func, callback=callback
-            )
+                func=func, callback=callback)
+
             if is_ready:
                 ret = self.periodic_task.start()
                 if ret:
@@ -614,6 +663,12 @@ class MMSRfid:
         except Exception as e:
             self.log_error(f"RFID[{self.name}] get_tags_end error:{e}")
 
+    # def reset(self):
+    #     if self._is_detecting:
+    #         self.detect_end()
+    #     if self._is_reading:
+    #         self.read_end()
+
     # ---- GCode commands ----
     def cmd_MMS_RFID_DETECT(self, gcmd):
         """
@@ -622,7 +677,7 @@ class MMSRfid:
         """
         switch = gcmd.get_int("SWITCH", 0)
         if switch == 1:
-            self.detect_begin(callback=self._handle_detected)
+            self.detect_begin(callback=self.handle_detected)
         else:
             self.detect_end()
 

@@ -19,12 +19,12 @@ from ..core.logger import log_time_cost
 from ..core.task import AsyncTask
 
 
-@dataclass(frozen=True)
-class EjectConfig:
-    # Extrude distance to fill space
-    # from entry/outlet triggered to nozzle
-    empty_retract_distance = 120  # mm
-    empty_retract_speed = 600    # mm/min
+# @dataclass(frozen=True)
+# class EjectConfig:
+#     # Extrude distance to fill space
+#     # from entry/outlet triggered to nozzle
+#     empty_retract_distance = 120  # mm
+#     empty_retract_speed = 600    # mm/min
 
 
 @dataclass(frozen=True)
@@ -33,30 +33,43 @@ class PrinterEjectConfig(PrinterConfig):
     # Unit: mm
     z_raise: float = 1.0
 
-    # Filament Retraction Settings
-    # Distance the extruder retracts during eject operation
-    # This is also the first phase of filament swap operations
-    # (e.g., 'T*' command)
-    # Total retraction = retract_distance × retract_times
+    # # Filament Retraction Settings
+    # # Distance the extruder retracts during eject operation
+    # # This is also the first phase of filament swap operations
+    # # (e.g., 'T*' command)
+    # # Total retraction = retract_distance × retract_times
+    # # Unit: mm
+    # retract_distance: float = 10.0
+    # # Number of retraction cycles performed
+    # retract_times: int = 100
+    # # Extruder retraction speed
+    # # Unit: mm/min
+    # retract_speed: float = 1200.0
+
+    # # Filament Unload Settings
+    # # Drive stepper speed for filament unloading
+    # # This pushes filament out of the toolhead
+    # # Unit: mm/s
+    # drive_speed: float = 20.0
+    # # Drive stepper acceleration for filament unloading
+    # # Unit: mm/s²
+    # drive_accel: float = 20.0
+    # # Total filament unload distance
+    # # Unit: mm
+    # distance_unload: float = 120.0
+
+    # Fast retraction before eject
     # Unit: mm
-    retract_distance: float = 10.0
-    # Number of retraction cycles performed
-    retract_times: int = 100
+    fast_retract_distance: float = 8.0
+    # Unit: mm/min
+    fast_retract_speed: float = 10000.0
+
+    # Extruder retraction distance
+    # Unit: mm
+    retract_distance: float = 120.0
     # Extruder retraction speed
     # Unit: mm/min
-    retract_speed: float = 1200.0
-
-    # Filament Unload Settings
-    # Drive stepper speed for filament unloading
-    # This pushes filament out of the toolhead
-    # Unit: mm/s
-    drive_speed: float = 20.0
-    # Drive stepper acceleration for filament unloading
-    # Unit: mm/s²
-    drive_accel: float = 20.0
-    # Total filament unload distance
-    # Unit: mm
-    distance_unload: float = 120.0
+    retract_speed: float = 600.0
 
     # Custom Macro
     custom_before: OptionalField = "MMS_EJECT_CUSTOM_BEFORE"
@@ -287,7 +300,7 @@ class MMSEject:
         # Sorted slot list following the priority rules
         return priority+remaining
 
-    def _standard_eject(self, check_entry):
+    def _standard_eject_async(self, check_entry):
         eject_slots = self.find_eject_slots()
         if not eject_slots:
             self.log_info_s("standard eject skip, no loading slots")
@@ -337,7 +350,7 @@ class MMSEject:
                 # Extruder retract a little bit to decrease nozzle remain
                 self.mms_purge.apply_retraction_compensation(slot_num)
                 # Apply pressure pulse cleaning
-                self.mms_purge.pressure_pulse_cleaning(slot_num)
+                # self.mms_purge.pressure_pulse_cleaning(slot_num)
 
             if self.mms_cut.is_enabled():
                 # Park to cutter init point
@@ -397,7 +410,7 @@ class MMSEject:
             return False
 
         try:
-            self._standard_eject(check_entry)
+            self._standard_eject_async(check_entry)
             self.mms_charge.teardown()
         except EjectFailedError as e:
             self.log_warning(e)
@@ -409,7 +422,7 @@ class MMSEject:
         self._exec_custom_macro(self.custom_after, "after")
         return True
 
-    def _standard_eject_sync(self):
+    def _standard_eject(self):
         eject_slots = self.find_eject_slots()
         if not eject_slots:
             msg = "no loading slots, mms eject skip"
@@ -458,6 +471,14 @@ class MMSEject:
 
             self.log_info_s(f"slots:{eject_slots} would be ejected")
 
+            # Apply fast retration before cut
+            mms_drive = self.mms.get_mms_slot(eject_slots[0]).get_mms_drive()
+            with mms_drive.sync_with_extruder():
+                extruder_adapter.retract(
+                    self.fast_retract_distance,
+                    self.fast_retract_speed
+                )
+
             if self.mms_cut.is_enabled():
                 # Park to cutter init point
                 self.mms_cut.cut_init()
@@ -484,8 +505,8 @@ class MMSEject:
                 # Sync retract
                 with mms_drive.sync_with_extruder():
                     extruder_adapter.retract(
-                        EjectConfig.empty_retract_distance,
-                        EjectConfig.empty_retract_speed,
+                        self.retract_distance,
+                        self.retract_speed
                     )
 
                 # Exit toolhead check
@@ -509,7 +530,7 @@ class MMSEject:
         try:
             self._exec_custom_macro(self.custom_before, "before")
 
-            res = self._standard_eject_sync()
+            res = self._standard_eject()
             self.mms_charge.teardown()
             if res:
                 self._exec_custom_macro(self.custom_after, "after")

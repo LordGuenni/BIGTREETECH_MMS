@@ -23,6 +23,7 @@ class GCodeAdapter(BaseAdapter):
     def _setup_logger(self):
         mms_logger = printer_adapter.get_mms_logger()
         self.log_info = mms_logger.create_log_info(console_output=True)
+        self.log_error = mms_logger.create_log_error(console_output=True)
 
     # -- GCode Control --
     def _get_gcode(self):
@@ -48,7 +49,11 @@ class GCodeAdapter(BaseAdapter):
 
     def run_command(self, command):
         if command:
-            self._get_gcode().run_script_from_command(command)
+            try:
+                self._get_gcode().run_script_from_command(command)
+            except Exception as e:
+                self.log_error(
+                    f"gcode adapter run command '{command}' error: {e}")
 
     # def run_script(self, script):
     #     if script:
