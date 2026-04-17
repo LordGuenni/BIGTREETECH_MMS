@@ -84,6 +84,9 @@ class SlotRFID:
     def has_tag_read(self):
         return self.tag_color is not None
 
+    def is_enabled(self):
+        return self.enable
+
     # ---- Write ----
     def rfid_write(self):
         self.log_info(f"SLOT[{self.slot_num}] RFID write begin")
@@ -187,7 +190,9 @@ class SlotRFID:
 
     def detect_tag(self):
         # Return tag UID or None
-        return self.mms_rfid.rfid_manager.get_uid()
+        if self.enable:
+            return self.mms_rfid.rfid_manager.get_uid()
+        return None
 
     def get_tag_uid(self):
         return self.tag_uid

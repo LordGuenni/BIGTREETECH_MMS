@@ -18,7 +18,7 @@ class GCodeAdapter(BaseAdapter):
 
     # -- Initialize --
     def register_self_command(self):
-        self.register("MMS_MAN", self.cmd_MMS_MAN)
+        self.register("MMS_MAN", self.cmd_MMS_MAN, "MMS commands manual")
 
     def _setup_logger(self):
         mms_logger = printer_adapter.get_mms_logger()
@@ -29,8 +29,8 @@ class GCodeAdapter(BaseAdapter):
     def _get_gcode(self):
         return self.safe_get(self._obj_name)
 
-    def register(self, command, handler):
-        self._get_gcode().register_command(command, handler)
+    def register(self, command, handler, desc=None):
+        self._get_gcode().register_command(command, handler, desc=desc)
         if command not in self._command_lst:
             self._command_lst.append(command)
 
@@ -44,8 +44,9 @@ class GCodeAdapter(BaseAdapter):
             cmd=cmd, key=key, value=value, func=func)
 
     def bulk_register(self, commands):
-        for command, handler in commands:
-            self.register(command, handler)
+        for command, handler, *rest in commands:
+            desc = rest[0] if rest else None
+            self.register(command, handler, desc)
 
     def run_command(self, command):
         if command:

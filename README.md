@@ -1,5 +1,5 @@
 ### Compatibility
-* Klipper: compatible between [Commits on Nov 27, 2025: stm32: f0 i2c clean nackcf interrupt on handle](https://github.com/Klipper3d/klipper/commit/938300f3c3cc25448c499a3a8ca5b47b7a6d4fa8) and the lastest version [Commits on Apr 10, 2026: stm32: define hard pwm PB pins for stm32g4](https://github.com/Klipper3d/klipper/commit/35ace52976e1ef8c00da9477d583cab610d70d1c). The stepper scheduling uses the newly updated `motion_queuing.py` upstream of Klipper, so it is necessary to use the new version of Klipper.
+* Klipper: compatible between [Commits on Nov 27, 2025: stm32: f0 i2c clean nackcf interrupt on handle](https://github.com/Klipper3d/klipper/commit/938300f3c3cc25448c499a3a8ca5b47b7a6d4fa8) and the lastest version [Commits on Apr 16, 2026: polar: add velocity scaling (#7172)](https://github.com/Klipper3d/klipper/commit/373f200ca69adb624675f42e685f61d85d49ba40). The stepper scheduling uses the newly updated `motion_queuing.py` upstream of Klipper, so it is necessary to use the new version of Klipper.
 * KlipperScreen: compatible between [Commits on Sep 12, 2025: refactor: less logging when on battery](https://github.com/KlipperScreen/KlipperScreen/commit/b3115f9b9b329642d4dbf0ad225ab065ea3eda80) and the lastest version [Commits on Apr 5, 2026: Revert "feat: Add an option to add the remaining spool weight to the title-bar (#1662)"](https://github.com/KlipperScreen/KlipperScreen/commit/056831910087a858908f9f5d117ad5c50446e729). In theory, earlier KlipperScreen also supports it, but it has not been actually tested yet.
 * Python: Only supports Klipper for Python 3 environment.
 
@@ -60,6 +60,6 @@ Please refor to [mms_config](./docs/en/mms_config.md) for details.
 Please refor to [mms_changelog](./docs/en/mms_changelog.md) for details.
 
 ### 🐇 Acknowledgements
-The script implementation referenced the logic and some source code from the excellent project [Happy-Hare](https://github.com/moggieuk/Happy-Hare).
+The script implementation referenced the logic and some source code from the excellent project [Happy-Hare](https://github.com/moggieuk/Happy-Hare) and [AFC](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On).
 
 Thanks to the open source community for creating such valuable resources, so we are able to build upon.

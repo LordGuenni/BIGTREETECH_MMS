@@ -1,84 +1,206 @@
 # MMS 更新日志
 
-## Ver 0.1.415
+## Ver 0.1.0449
+
+- RFID 修复单次直接读取函数未前置检查 enable 开关的问题
+
+## Ver 0.1.0448
+
+- SLOT 取消夹料修正距离的取绝对值操作
+- Delivery MMS9/MMS8 恢复旧逻辑的 MMS_SLOTS_WALK/MMS_SLOTS_LOOP，MMS09/MMS08 则作为产线用 Dev 命令
+- gcode_adapter 注册命令时，增加命令说明支持
+
+## Ver 0.1.0446
+
+- Delivery mms_slots_check()/MMS8 新增逻辑
+  - 每个 SLOT 开始前启用该 SLOT 对应的 MFRC522 detect 是否有 Tag
+    - 若有则将该 MFRC522 对应的相邻 SLOT 各自 safe_retract 并重试直至 Tag 未读取
+    - 即开始前不让 Tag 处于被读取位置
+  - 每个 SLOT 进料到 Entry/Outlet 触发后，若未读取到 RFID 则不直接抛出异常终止，而是退出至 Gate 外并重试
+
+## Ver 0.1.0445
+
+- GCode Adapter 增加对 GCode 命令执行的异常捕获
+- SLOT 增加 format_deliver_distance() 函数组装并返回 MMS7 测量的距离数据
+- MMS_STATUS/MMS0/MMS00 命令返回的 MMS 系统状态带距离数据
+- Delivery 有距离校准后，当进料到 Outlet/Entry 触发时使用特殊移动方式:
+  - 先移动测量距离，剩余距离再慢速 Homing
+  - 余量距离来自退料到 Gate 外的 safe_retract
+
+## Ver 0.1.0443 ~ 0.1.0444
+
+- PeriodicTask 定时任务增加 timeout callback 流，方便任务超时后能通过回调通知业务模块
+- MMS RFID 增加 handle timeout 机制，处理 detect/read 超时后的逻辑
+- SLOT RFID 修正 duration 参数的传递问题，reset() 函数增加 MMS RFID 相关状态检查与控制
+- Autoload 改为默认开启
+- Charge/Eject 默认使用同步方案，旧异步方案所使用的配置项大量删除，新增同步方案所需配置项
+
+## Ver 0.1.0441 ~ 0.1.0442
+
+- Purge 默认 purge_speed 从 600 降至 300 mm/min
+- Delivery 命令 MMS8 内含的 mms_slots_check() 函数逻辑变更，修正 Exception 抛出后 rfid_detect() 可能没有正常停止的错误
+- SLOT/SLOT_RFID/MMS_RFID 新增 detect_only 相关模式
+- 新增 MMS_RFID_RESET 命令
+
+## Ver 0.1.0439 ~ 0.1.0440
+
+- Purge 重新使用异步方案，避免堵头造成的啃料问题
+- Config 中的 cfg 文件增加 TRSync/Neopixel 的 Klipper 全局参数配置
+
+## Ver 0.1.0438
+
+- Stepper Drive sync with Extruder 同步状态管理加强
+- SLOT 距离校准命令新增别名 MMS_BOWDEN_CALIBRATION
+- 实际 Deliver 运动中测算的值不覆盖原距离校准值，即实时动态校准逻辑取消
+- 距离校准测试结果保留至文件 mms-slot-meta.json
+- 增加校准数据手动实时变更工作流
+
+## Ver 0.1.0436 ~ 0.1.0437
+
+- 测试并处理 Charge/Purge 同步机制下啃料问题
+
+## Ver 0.1.0435
+
+- 优化同步方案的细节表现
+
+## Ver 0.1.0432 ~ 0.1.0434
+
+- Charge/Eject/Purge 使用同步方案替换原有复杂异步方案，简化 Buffer 相关操作
+
+## Ver 0.1.0431
+
+- Unselect 逻辑变更，增加 MMS_EJECT_UNSELECT 命令
+- 新增同步方案下的 Charge/Eject/Purge 行为逻辑
+
+## Ver 0.1.0429 ~ 0.1.0430
+
+- 大幅重构 drive_deliver 相关逻辑，送料逻辑变更
+- 由于相对偏低层的调度逻辑被更新，中间层的运动控制函数也同步大幅更新
+- 变更原有 MMS_SLOTS_WALK 为距离校准功能，alias 为 MMS7
+
+## Ver 0.1.0428
+
+- Autoload/Preload 适配新的正反转动夹料逻辑，不再自行控制夹料，而是交给 MMS Delivery 进行
+
+## Ver 0.1.0427
+
+- SLOT Meta 删除原本 deliver_distance 按距离区分字段数据结构
+- 改为使用 deliver_vector 字典作为数据存储，即以抽象向量的形式存储管理
+- 对应新数据结构重写接口函数
+
+## Ver 0.1.0426
+
+- Buffer 删除 fill/clear/halfway 的 speed/accel 参数传入控制
+- SLOT 增加对 meta 中用于 homing 的 deliver_distance 增删改接口，增加上下文管理器用于防止部分短距离逻辑覆盖测算好的正常值
+
+## Ver 0.1.0425
+
+- Delivery 适配新的动态距离进退料机制
+- Buffer 动态距离支持
+
+## Ver 0.1.0422 ~ 0.1.0424
+
+- Delivery 动态测算并记录 SLOT Pin to Pin 的步进电机运动距离
+- SLOT Meta 支持 CRUD 相关管理
+
+## Ver 0.1.0421
+
+- 新增 MMS Dryer 模块，负责集中管理舱温加热相关功能
+
+## Ver 0.1.0419 ~ 0.1.0420
+
+- 彻底删除 slot_meta 字典以及对应逻辑，改为使用新引入的 SLOT Meta 机制
+- SLOT Meta 负责初始化、更新、管理 SLOTs 相关的基本属性
+
+## Ver 0.1.0418
+
+- Eject 取消终段的 MMS_UNSELECT
+- Macro MMS_EJECT_SLOT 在 MMS_EJECT 后增加 MMS_UNSELECT
+
+## Ver 0.1.0416 ~ 0.1.0417
+
+- mms-extend.cfg 增加 Heater 相关支持
+- 更新 Extend Config 组合方式，加载顺序、配置内容大量变更
+
+## Ver 0.1.0415
 
 - ChangeLog 补充
 
-## Ver 0.1.414
+## Ver 0.1.0414
 
 - 打印结束时注册的回调从 mms_eject 改为 mms_eject_unselect，即增加 unselect 功能
 
-## Ver 0.1.413
+## Ver 0.1.0413
 
 - Buffer 简化日志输出
 - Stepper wait_idle() 控制删除，is_running 软锁控制机制变更
 - Observer 新增 StepperInfo，在 Observer 中注册/管理 mms stepper 信息
 - Observer 新增 StepperRunningManager，负责在观察循环里检查注册 MMS 电机的运动状态，判断步进电机是否实际运动中（理论上同样可以用于判断是否抱死）
 
-## Ver 0.1.412
+## Ver 0.1.0412
 
 - Buffer/Delivery 优化日志输出
 - Delivery 增加管理调度定向定距离移动的统一方法，其他模块（如 Purge）对应逻辑更新
 
-## Ver 0.1.411
+## Ver 0.1.0411
 
 - 修复 Delivery wait stepper idle 相关 bug
 
-## Ver 0.1.410
+## Ver 0.1.0410
 
 - Selector refine calibration distance 可配置化
 - Endless Spool 未开启时逻辑更新
 
-## Ver 0.1.409
+## Ver 0.1.0409
 
 - MMS Stepper running/wait_idle/terminate 机制迭代
 - SLOT/SLOT_Pin Homing terminal 相关逻辑抽象至各模块自身职能范围内
 
-## Ver 0.1.408
+## Ver 0.1.0408
 
 - MMS Buffer feed/retract 小规模重构
 - 继续增加运动调度过程中对 distance/speed/accel 三个关键运动参数的强校验步骤
 - 修复非法运动参数导致 ManualMove.end_print_time 被错误赋空值导致的数学计算错误问题
 
-## Ver 0.1.407
+## Ver 0.1.0407
 
 - 修复 MMS Stepper ManualMove 运动方式在小距离移动调度时距离丢失的问题
 
-## Ver 0.1.406
+## Ver 0.1.0406
 
 - Delivery/Stepper 增加对 speed/accel 等运动参数的校验，防止非法负值/超大值/超小值的传入
 - 修正日志拼写错误
 
-## Ver 0.1.405
+## Ver 0.1.0405
 
 - Delivery 调整 Stepper:Selector 固定距离移动相关参数
 - Delivery 新增 MMS_TEST_SELECTOR，用于测试 Selector 移动的一致性
 - Delivery 新增 MMS_TEST_SELECTOR_MEASURE，用于测量 Pin:Selector 的可用触发区间
 - Stepper 增加运动结束后的距离监控日志输出
 
-## Ver 0.1.404
+## Ver 0.1.0404
 
 - bigtreetech-mms/hardware/mms-stepper.cfg 配置变更
 - Delivery Stepper:Selector 相关调度逻辑变更
 - Stepper 调度核心参数 interval_time 采用差分策略配置
 
-## Ver 0.1.403
+## Ver 0.1.0403
 
 - Stepper "Communication timeout during homing" 异常不再 Shutdown，改为上报业务层
 - Charge 变更 Careful Load 失败的异常处理逻辑，以适配 Stepper 的变动
 - Delivery Select SLOT 成功后终段的固定距离校准问题修复
 
-## Ver 0.1.402
+## Ver 0.1.0402
 
 - 增强 MMS Pause/Resume 的状态管理
 - 修复 Charge 失败暂停后用户手动停止打印，新打印任务中 Charge 再次失败后暂停被跳过的问题
 
-## Ver 0.1.401
+## Ver 0.1.0401
 
 - MMS Buffer 增强扩展 VVD/Buffer 场景下的日志输出
 - 修复 Extend 后多 Buffer 场景下，暂停恢复后 Monitor 错误监控 SLOT 导致送料异常问题
 
-## Ver 0.1.400
+## Ver 0.1.0400
 
 - 新增 MMS_MAN 命令，自动记录并输出由 MMS 创建的原生命令
 

@@ -1,5 +1,125 @@
 # MMS Change Log
 
+## Ver 0.1.0449
+
+- Fixed RFID issue where the direct single-read function did not check the enable switch in advance
+
+## Ver 0.1.0448
+
+- Removed absolute value operation for clamping correction distance in SLOT
+- Restored legacy MMS_SLOTS_WALK/MMS_SLOTS_LOOP logic for Delivery MMS9/MMS8; MMS09/MMS08 are used as production-line Dev commands
+- Added command description support when registering commands in gcode_adapter
+
+## Ver 0.1.0446
+
+- Added new logic for Delivery mms_slots_check()/MMS8
+  - Enable MFRC522 detection for the corresponding SLOT to check for Tag presence before each SLOT starts
+    - If a Tag is detected, perform safe_retract on the adjacent SLOTs corresponding to that MFRC522 and retry until no Tag is read
+    - Ensure no Tag is in the read position before starting
+  - After feeding each SLOT to the Entry/Outlet trigger, if no RFID is detected, do not throw an exception to abort directly; instead, retract outside the Gate and retry
+
+## Ver 0.1.0445
+
+- Added exception catching for GCode command execution in GCode Adapter
+- Added format_deliver_distance() function in SLOT to assemble and return distance data measured by MMS7
+- MMS system status returned by MMS_STATUS/MMS0/MMS00 commands now includes distance data
+- After Delivery distance calibration, a special movement mode is used when feeding to Outlet/Entry trigger:
+  - Move the measured distance first, then perform slow Homing for the remaining distance
+  - The remaining distance comes from safe_retract when retracting outside the Gate
+
+## Ver 0.1.0443 ~ 0.1.0444
+- Added timeout callback stream for PeriodicTask timed tasks, enabling callback notifications to business modules upon task timeout
+- Added handle timeout mechanism for MMS RFID to handle logic after detect/read timeout
+- Fixed duration parameter passing issue in SLOT RFID; added MMS RFID-related status checks and control to the reset() function
+- Set Autoload to enabled by default
+- Charge/Eject now uses synchronous mode by default; most configuration items for the old asynchronous mode removed, new configuration items for synchronous mode added
+
+## Ver 0.1.0441 ~ 0.1.0442
+- Reduced default purge_speed for Purge from 600 to 300 mm/min
+- Modified logic of the mms_slots_check() function included in Delivery command MMS8, fixed the error where rfid_detect() might not stop properly after an Exception is thrown
+- Added detect_only related modes for SLOT/SLOT_RFID/MMS_RFID
+- Added MMS_RFID_RESET command
+
+## Ver 0.1.0439 ~ 0.1.0440
+
+- Reverted Purge to asynchronous mode to avoid filament grinding caused by nozzle clogging
+- Added global Klipper parameter configuration for TRSync/Neopixel in cfg files under Config
+
+## Ver 0.1.0438
+
+- Enhanced synchronization state management for Stepper Drive sync with Extruder
+- Added alias MMS_BOWDEN_CALIBRATION for the SLOT distance calibration command
+- Values calculated during actual Deliver movement no longer overwrite the original calibrated distance values; real-time dynamic calibration logic removed
+- Saved distance calibration test results to file mms-slot-meta.json
+- Added workflow for manual real-time modification of calibration data
+
+## Ver 0.1.0436 ~ 0.1.0437
+
+- Tested and addressed filament grinding under the Charge/Purge synchronization mechanism
+
+## Ver 0.1.0435
+
+- Optimized detailed behavior of the synchronization scheme
+
+## Ver 0.1.0432 ~ 0.1.0434
+
+- Replaced the original complex asynchronous scheme with synchronous mode for Charge/Eject/Purge, simplifying Buffer-related operations
+
+## Ver 0.1.0431
+
+- Modified Unselect logic, added MMS_EJECT_UNSELECT command
+- Added Charge/Eject/Purge behavior logic under the synchronous scheme
+
+## Ver 0.1.0429 ~ 0.1.0430
+
+- Major refactoring of drive_deliver related logic and feeding logic
+- Lower-level scheduling logic updated, with corresponding major updates to intermediate motion control functions
+- Renamed original MMS_SLOTS_WALK to distance calibration function, alias set to MMS7
+
+## Ver 0.1.0428
+
+- Adapted Autoload/Preload to the new forward/reverse clamping logic; no longer controls clamping directly, delegating to MMS Delivery instead
+
+## Ver 0.1.0427
+
+- Removed distance-based field data structure for original deliver_distance from SLOT Meta
+- Replaced with deliver_vector dictionary for data storage, managing in the form of abstract vectors
+- Rewrote interface functions corresponding to the new data structure
+
+## Ver 0.1.0426
+
+- Removed speed/accel parameter passing control for fill/clear/halfway in Buffer
+- Added CRUD interfaces for homing-related deliver_distance in SLOT meta; added context manager to prevent short-distance logic from overwriting calibrated normal values
+
+## Ver 0.1.0425
+
+- Adapted Delivery to the new dynamic distance feed/retract mechanism
+- Added dynamic distance support for Buffer
+
+## Ver 0.1.0422 ~ 0.1.0424
+
+- Dynamically calculated and recorded stepper motor movement distance for SLOT Pin to Pin in Delivery
+- Enabled SLOT Meta CRUD management
+
+## Ver 0.1.0421
+
+- Added new MMS Dryer module for centralized management of chamber heating-related functions
+
+## Ver 0.1.0419 ~ 0.1.0420
+
+- Completely removed the slot_meta dictionary and corresponding logic, replaced with the newly introduced SLOT Meta mechanism
+- SLOT Meta responsible for initializing, updating, and managing basic properties related to SLOTs
+
+## Ver 0.1.0418
+
+- Removed final MMS_UNSELECT step from Eject
+- Macro MMS_EJECT_SLOT now appends MMS_UNSELECT after MMS_EJECT
+
+## Ver 0.1.0416 ~ 0.1.0417
+
+- Added Heater-related support in mms-extend.cfg
+- Updated Extend Config composition method with major changes to loading order and configuration content
+
 ## Ver 0.1.415
 
 - ChangeLog supplement

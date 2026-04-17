@@ -115,29 +115,101 @@ class MMSDelivery:
     def _initialize_gcode(self):
         commands = [
             # Core operations
-            ("MMS_LOAD", self.cmd_MMS_LOAD),
-            ("MMS_UNLOAD", self.cmd_MMS_UNLOAD),
-            ("MMS_POP", self.cmd_MMS_POP),
-            ("MMS_PREPARE", self.cmd_MMS_PREPARE),
-            ("MMS_MOVE", self.cmd_MMS_MOVE),
+            (
+                "MMS_LOAD",
+                self.cmd_MMS_LOAD,
+                "Homing filament until entry/outlet is triggered."
+            ),
+            (
+                "MMS_UNLOAD",
+                self.cmd_MMS_UNLOAD,
+                "Homing filament until gate is released."
+            ),
+            (
+                "MMS_POP",
+                self.cmd_MMS_POP,
+                "Homing filament until inlet is released."
+            ),
+            (
+                "MMS_PREPARE",
+                self.cmd_MMS_PREPARE,
+                "Make sure filament is ready to load."
+            ),
+            (
+                "MMS_MOVE",
+                self.cmd_MMS_MOVE,
+                "Move filament in target slot: MMS_MOVE SLOT=n DISTANCE=a."
+            ),
             ("MMS_DRIP_MOVE", self.cmd_MMS_DRIP_MOVE),
+
             # Selection controls
-            ("MMS_SELECT", self.cmd_MMS_SELECT),
-            ("MMS_UNSELECT", self.cmd_MMS_UNSELECT),
+            (
+                "MMS_SELECT",
+                self.cmd_MMS_SELECT,
+                "Select the target slot: MMS_SELECT SLOT=n"
+            ),
+            (
+                "MMS_UNSELECT",
+                self.cmd_MMS_UNSELECT,
+                "Unselect current slot."
+            ),
 
             # Stop commands
             ("MMS_STOP", self.cmd_MMS_STOP),
             # Diagnostic commands
-            ("MMS_SLOTS_CHECK", self.cmd_MMS_SLOTS_CHECK),
-            ("MMS_SLOTS_LOOP", self.cmd_MMS_SLOTS_LOOP),
+            (
+                "MMS_SLOTS_CHECK",
+                self.cmd_MMS_SLOTS_CHECK,
+                "Check slots' pins, for DEV only."
+            ),
+            (
+                "MMS_SLOTS_CHECK_LOOP",
+                self.cmd_MMS_SLOTS_CHECK_LOOP,
+                "Loop checking slots' pins, for DEV only."
+            ),
+            (
+                "MMS_SLOTS_WALK",
+                self.cmd_MMS_SLOTS_WALK,
+                "Deliver all ready slots like walking through."
+            ),
+            (
+                "MMS_SLOTS_LOOP",
+                self.cmd_MMS_SLOTS_LOOP,
+                "SLOTs walk looping."
+            ),
             # Calibration
-            ("MMS_BOWDEN_CALIBRATION", self.cmd_MMS_BOWDEN_CALIBRATION),
+            (
+                "MMS_BOWDEN_CALIBRATION",
+                self.cmd_MMS_BOWDEN_CALIBRATION,
+                "Calibrate bowden distance of slots."
+            ),
             # Command aliases
             ("MMS999", self.cmd_MMS_STOP),
-            ("MMS9", self.cmd_MMS_SLOTS_CHECK),
-            ("MMS8", self.cmd_MMS_SLOTS_LOOP),
-            ("MMS7", self.cmd_MMS_BOWDEN_CALIBRATION),
-            ("MMS_SLOTS_WALK", self.cmd_MMS_BOWDEN_CALIBRATION),
+            (
+                "MMS9",
+                self.cmd_MMS_SLOTS_WALK,
+                "Deliver all ready slots like walking through."
+            ),
+            (
+                "MMS8",
+                self.cmd_MMS_SLOTS_LOOP,
+                "SLOTs walk looping."
+            ),
+            (
+                "MMS7",
+                self.cmd_MMS_BOWDEN_CALIBRATION,
+                "Calibrate bowden distance of slots."
+            ),
+            (
+                "MMS09",
+                self.cmd_MMS_SLOTS_CHECK,
+                "Check slots' pins, for DEV only."
+            ),
+            (
+                "MMS08",
+                self.cmd_MMS_SLOTS_CHECK_LOOP,
+                "Loop checking slots' pins, for DEV only."
+            ),
 
             # Extruder sync
             ("MMS_SLOT_EXTRUDER_SYNC", self.cmd_MMS_SLOT_EXTRUDER_SYNC),
@@ -1358,7 +1430,6 @@ class MMSDelivery:
 
                 # Prepare before
                 self.unload_loading_slots()
-                # self.load_to_gate(slot_num)
                 self.unload_to_gate(slot_num)
                 self.load_to_gate(slot_num)
 
@@ -1435,7 +1506,11 @@ class MMSDelivery:
             raise Exception(f"slot[{slot_num}] Entry")
 
     def verify_rfid(self, mms_slot):
-        tag_uid = mms_slot.slot_rfid.get_tag_uid()
+        slot_rfid = mms_slot.slot_rfid
+        if not slot_rfid.is_enabled():
+            return
+
+        tag_uid = slot_rfid.get_tag_uid()
         if not tag_uid:
             raise Exception(f"slot[{mms_slot.get_num()}] RFID")
 
@@ -1489,11 +1564,11 @@ class MMSDelivery:
                 # Load to check pins and RFID detection
                 for i in range(self.retry_times):
                     with mms_slot.slot_rfid.detect_only():
-                        # Trigger all Entry and Outlet
+                        # Trigger all Outlet and Entry
+                        self.load_to_outlet(slot_num)
                         if mms_slot.entry_is_set() \
                             and not mms_slot.entry_is_triggered():
                             self.load_to_entry(slot_num)
-                        self.load_to_outlet(slot_num)
                         self.log_info(
                             "load: " + mms_slot.format_pins_status())
                         # Verify
@@ -1544,17 +1619,71 @@ class MMSDelivery:
         self.log_info("slots check finish")
         return True
 
+    def mms_slots_check_loop(self):
+        self.log_info("slots loop begin")
+        total = self.pd_config.slots_loop_times
+        for i in range(total):
+            msg = f"############### check loop: {i+1}/{total} ###############"
+            self.log_info(msg)
+            success = self.mms_slots_check()
+            if not success or not self._can_walk():
+                break
+        self.log_info("slots check loop finish")
+        self.log_info("#" * 60)
+
+    def mms_slots_walk(self):
+        self.log_info("slots walk begin")
+        # Walk through all SLOTs
+        for slot_num in self.mms.get_slot_nums():
+            if not self._can_walk():
+                return False
+
+            try:
+                self.unload_loading_slots(skip_slot=slot_num)
+                self.pause(1)
+
+                mms_slot = self.mms.get_mms_slot(slot_num)
+                if mms_slot.entry_is_set():
+                    self.load_to_entry(slot_num)
+                else:
+                    self.load_to_outlet(slot_num)
+
+            except DeliveryTerminateSignal:
+                self.log_info("slots walk terminated")
+                return False
+            except DeliveryReadyError:
+                pass
+            except Exception as e:
+                self.log_error(f"slots walk error:{e}")
+                return False
+
+        # Finally unload
+        if self._can_walk():
+            try:
+                self.unload_loading_slots()
+            except DeliveryTerminateSignal:
+                self.log_info("slots walk terminated")
+                return False
+            except DeliveryReadyError:
+                pass
+            except Exception as e:
+                self.log_error(f"slots walk error:{e}")
+                return False
+
+        self.unselect()
+        self.log_info("slots walk finish")
+        return True
+
     def mms_slots_loop(self):
         self.log_info("slots loop begin")
         total = self.pd_config.slots_loop_times
         for i in range(total):
             msg = f"############### loop: {i+1}/{total} ###############"
             self.log_info(msg)
-            success = self.mms_slots_check()
+            success = self.mms_slots_walk()
             if not success or not self._can_walk():
                 break
         self.log_info("slots loop finish")
-        self.log_info("#" * 60)
 
     @log_time_cost("log_info_s")
     def mms_stop(self, slot_num=None):
@@ -1767,6 +1896,28 @@ class MMSDelivery:
             self.mms_slots_check()
         else:
             self.deliver_async_task(self.mms_slots_check)
+
+    def cmd_MMS_SLOTS_CHECK_LOOP(self, gcmd=None):
+        if not self.mms.cmd_can_exec():
+            self.log_warning("cmd_MMS_SLOTS_CHECK_LOOP can not execute now")
+            return
+
+        should_wait = gcmd.get_int("WAIT", default=0)
+        if bool(should_wait):
+            self.mms_slots_check_loop()
+        else:
+            self.deliver_async_task(self.mms_slots_check_loop)
+
+    def cmd_MMS_SLOTS_WALK(self, gcmd=None):
+        if not self.mms.cmd_can_exec():
+            self.log_warning("MMS_SLOTS_WALK can not execute now")
+            return
+
+        should_wait = gcmd.get_int("WAIT", default=0)
+        if bool(should_wait):
+            self.mms_slots_walk()
+        else:
+            self.deliver_async_task(self.mms_slots_walk)
 
     def cmd_MMS_SLOTS_LOOP(self, gcmd=None):
         if not self.mms.cmd_can_exec():

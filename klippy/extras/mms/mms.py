@@ -40,7 +40,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0446"
+    version: str = "0.1.0449"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -320,9 +320,17 @@ class MMS:
     # -- Initializers --
     def _initialize_gcode(self):
         commands = [
-            ("MMS", self.cmd_MMS),
-            ("MMS_STATUS", self.cmd_MMS_STATUS),
-            ("MMS_SAMPLE", self.cmd_MMS_SAMPLE),
+            ("MMS", self.cmd_MMS, "Print version of MMS."),
+            (
+                "MMS_STATUS",
+                self.cmd_MMS_STATUS,
+                "Print status of MMS."
+            ),
+            (
+                "MMS_SAMPLE",
+                self.cmd_MMS_SAMPLE,
+                "Sample status of MMS in 60 seconds."
+            ),
             ("MMS_STATUS_STEPPER", self.cmd_MMS_STATUS_STEPPER),
             ("MMS_SAMPLE_STEPPER", self.cmd_MMS_SAMPLE_STEPPER),
 
@@ -344,10 +352,18 @@ class MMS:
             ("MMS_DRYER_STOP", self.cmd_MMS_DRYER_STOP),
 
             # Alias
-            ("MMS00", self.cmd_MMS_STATUS),
-            ("MMS0", self.cmd_MMS_SAMPLE),
-            ("MMS009", self.cmd_MMS_STATUS_STEPPER),
-            ("MMS09", self.cmd_MMS_SAMPLE_STEPPER),
+            (
+                "MMS00",
+                self.cmd_MMS_STATUS,
+                "Print status of MMS."
+            ),
+            (
+                "MMS0",
+                self.cmd_MMS_SAMPLE,
+                "Sample status of MMS in 60 seconds."
+            ),
+            ("MMS07", self.cmd_MMS_STATUS_STEPPER),
+            ("MMS007", self.cmd_MMS_SAMPLE_STEPPER),
 
             ("MMS_TEST", self.cmd_MMS_TEST),
         ]

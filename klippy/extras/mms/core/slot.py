@@ -273,18 +273,18 @@ class MMSSlot:
         return self.slot_config.endless_with_slot
 
     def get_selector_calibrate_distance(self):
-        return abs(self.slot_config.selector_calibrate_distance)
+        return self.slot_config.selector_calibrate_distance
 
     def get_status(self, eventtime=None):
         return self.meta.report() if self._is_ready else {}
 
     # ---- RFID support ----
-    def rfid_is_enabled(self):
-        return self.slot_config.rfid_enable
+    # def rfid_is_enabled(self):
+    #     return self.slot_config.rfid_enable
 
-    def rfid_is_detecting(self):
-        return self.slot_rfid.is_detecting() or \
-            self.slot_rfid.mms_rfid.is_detecting()
+    # def rfid_is_detecting(self):
+    #     return self.slot_rfid.is_detecting() or \
+    #         self.slot_rfid.mms_rfid.is_detecting()
 
     # ---- MMS support ----
     def mark_is_extended(self, extend_num):
