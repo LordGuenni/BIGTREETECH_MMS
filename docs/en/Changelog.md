@@ -1,5 +1,25 @@
 # MMS Change Log
 
+## Ver 0.1.0453
+
+- Modified the segmented behavior of Stepper:Drive feed/retract after distance verification; the first segment changed from fixed-distance movement to Homing (same as the second segment)
+
+## Ver 0.1.0452
+
+- Fixed compatibility issues with the legacy KlipperScreen for ViViD/MMS Ver 0.2.0011
+
+## Ver 0.1.0451
+
+- Changed the modification method of Swap SLOT mapping, split into single-layer changes and iterater changes
+
+## Ver 0.1.0450
+
+- Exposed sprint_speed/sprint_accel parameters in Delivery as user-configurable items, newly added in mms-motion.cfg
+  - These speed/accel configurations are used for short-distance deliver movements and Autoload
+- Modified log output format of deliver distance after SLOT calibration to fix the issue where ->/<- could not be displayed correctly in KlipperScreen Console
+- Added exception catching for Resume to prevent system Shutdown when exceptions are thrown again during recovery
+- Added final success/failure judgment for the synchronous scheme in Eject to avoid the issue where unloading fails but the subsequent Charge process still runs under special conditions
+
 ## Ver 0.1.0449
 
 - Fixed RFID issue where the direct single-read function did not check the enable switch in advance

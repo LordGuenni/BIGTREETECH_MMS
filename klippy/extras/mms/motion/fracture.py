@@ -254,7 +254,8 @@ class MMSFilamentFracture:
         return True
         # slot_num_sub = self.mms.find_available_substitute_slot(slot_num)
         # if slot_num_sub is not None:
-        #     self.mms_swap.update_mapping_slot_num(slot_num, slot_num_sub)
+        #     self.mms_swap.update_mapping_slot_num_iter(
+        #         slot_num, slot_num_sub)
         #     self.mms_resume.gcode_resume()
         #     return True
         # return False

@@ -240,7 +240,8 @@ class MMSEndlessSpool:
                 self.mms.get_mms_slot(slot_num)
             )
             return
-        self.mms_swap.update_mapping_slot_num(slot_num, slot_num_new)
+        self.mms_swap.update_mapping_slot_num_iter(
+            slot_num, slot_num_new)
         self.mms_resume.gcode_resume()
 
     # ---- Handlers ----
@@ -372,7 +373,8 @@ class MMSEndlessSpool:
                     self.mms.get_mms_slot(slot_num)
                 )
                 return
-            self.mms_swap.update_mapping_slot_num(slot_num, slot_num_new)
+            self.mms_swap.update_mapping_slot_num_iter(
+                slot_num, slot_num_new)
         except EndlessSpoolFailedError as e:
             self.log_warning(e)
             return

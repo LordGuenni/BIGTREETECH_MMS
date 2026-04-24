@@ -493,6 +493,8 @@ class MMSEject:
                 # Park to tray point
                 self.mms_purge.move_to_tray()
 
+            success = False
+
             for slot_num in eject_slots:
                 mms_slot = self.mms.get_mms_slot(slot_num)
                 mms_drive = mms_slot.get_mms_drive()
@@ -519,12 +521,17 @@ class MMSEject:
                     raise EjectFailedError(msg, mms_slot)
 
                 # Unload
-                self.mms_delivery.mms_unload(slot_num)
+                success = self.mms_delivery.mms_unload(slot_num)
 
-            msg = "mms eject finish"
-            gcode_adapter.respond_echo(msg)
-            self.log_info_s(msg)
-            return True
+            if success:
+                msg = "mms eject finish"
+                gcode_adapter.respond_echo(msg)
+                self.log_info_s(msg)
+                return True
+            else:
+                msg = f"slot[{slot_num}] unload failed"
+                gcode_adapter.respond_error(msg)
+                raise EjectFailedError(msg, mms_slot)
 
     def mms_eject(self):
         try:

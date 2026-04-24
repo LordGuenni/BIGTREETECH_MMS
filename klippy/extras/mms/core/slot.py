@@ -459,13 +459,12 @@ class MMSSlot:
         b_pin = self.pin_type.gate
 
         # Deliver forward to trigger Entry
-        dist = self.meta.get_deliver_distance(f_pin, forward=True)
-        info += f"{b_pin}->{f_pin}:{dist or 0:.2f}mm, "
-
+        f_dist = self.meta.get_deliver_distance(f_pin, forward=True)
         # Deliver backward to release Entry
-        dist = self.meta.get_deliver_distance(b_pin, forward=False)
-        info += f"{b_pin}<-{f_pin}:{dist or 0:.2f}mm"
+        b_dist = self.meta.get_deliver_distance(b_pin, forward=False)
 
+        info += f"{b_pin} to {f_pin} "
+        info += f"↓={f_dist or 0:.2f}mm/↑={b_dist or 0:.2f}mm"
         info += "\n"
         return info
 

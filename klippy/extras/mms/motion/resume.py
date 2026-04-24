@@ -156,6 +156,15 @@ class MMSResume:
             self.log_error(f"{msg} error: {e}")
         return False
 
+    def _handle_resume_failed(self):
+        self.mms_pause.set_mms_paused()
+        # Recover paused flag after
+        # mms_resume->send_resume_command() is exit
+        self.reactor.register_timer(
+            callback=self._turn_on_pause_flag,
+            waketime=self.reactor.monotonic() + 1.0
+        )
+
     def mms_resume(self):
         if self.is_resuming():
             self.log_warning("mms_resume is resuming, return...")
@@ -167,43 +176,42 @@ class MMSResume:
 
         self.log_info("mms_resume begin")
 
-        # Reselect the charging slot or selecting slots at paused
-        slot_num_c = self.mms_charge.get_charged_slot()
-        if slot_num_c is not None:
-            self.mms_delivery.select_slot(slot_num_c)
-        else:
-            for slot_num_s in self._selected_slots:
-                self.mms_delivery.select_slot(slot_num_s)
-        self._selected_slots = []
+        try:
+            # Reselect the charging slot or selecting slots at paused
+            slot_num_c = self.mms_charge.get_charged_slot()
+            if slot_num_c is not None:
+                self.mms_delivery.select_slot(slot_num_c)
+            else:
+                for slot_num_s in self._selected_slots:
+                    self.mms_delivery.select_slot(slot_num_s)
+            self._selected_slots = []
 
-        # If not pause by MMS, continue with origin resume
-        if self.mms_pause.is_mms_paused():
-            with self._mms_resuming():
-                # Update paused flag early
-                self._turn_off_pause_flag()
-                self.mms_pause.free_mms_paused()
+            # If not pause by MMS, continue with origin resume
+            if self.mms_pause.is_mms_paused():
+                with self._mms_resuming():
+                    # Update paused flag early
+                    self._turn_off_pause_flag()
+                    self.mms_pause.free_mms_paused()
 
-                # Resume mms_swap
-                success = self._resume_mms_swap()
-                if not success:
-                    self.log_warning(
-                        "mms_resume resume failed, resume abort..."
-                    )
-                    self.mms_pause.set_mms_paused()
-                    # Recover paused flag after
-                    # mms_resume->send_resume_command() is exit
-                    self.reactor.register_timer(
-                        callback=self._turn_on_pause_flag,
-                        waketime=self.reactor.monotonic() + 1.0
-                    )
-                    return False
+                    # Resume mms_swap
+                    success = self._resume_mms_swap()
+                    if not success:
+                        self.log_warning(
+                            "mms_resume resume failed, resume abort...")
+                        self._handle_resume_failed()
+                        return False
 
-        # Execute origin send_resume_command() of pause_resume
-        self.log_info("mms_resume wakeup origin resume command")
-        self._origin_resume()
+            # Execute origin send_resume_command() of pause_resume
+            self.log_info("mms_resume wakeup origin resume command")
+            self._origin_resume()
 
-        self.log_info("mms_resume finish")
-        return True
+            self.log_info("mms_resume finish")
+            return True
+
+        except Exception as e:
+            self.log_error(f"mms_resume falied: {e}")
+            self._handle_resume_failed()
+            return False
 
     def cmd_MMS_RESUME(self, gcmd):
         return self.mms_resume()

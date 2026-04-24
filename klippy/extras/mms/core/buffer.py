@@ -64,8 +64,8 @@ class BufferConfig:
     e_distance_moved_min: float = -20
     e_distance_moved_max: float = 100
 
-    sprint_speed: float = 50 # mm/s
-    sprint_accel: float = 150 # mm/s^2
+    # sprint_speed: float = 50 # mm/s
+    # sprint_accel: float = 150 # mm/s^2
 
     # ---- Calculate ----
     # Cross section of filament, in mm^2

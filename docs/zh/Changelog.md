@@ -1,5 +1,25 @@
 # MMS 更新日志
 
+## Ver 0.1.0453
+
+- Stepper:Drive 进退料在距离校检后的分段行为，首段从固定距离运动改为和第二段一样使用 Homing
+
+## Ver 0.1.0452
+
+- 与旧版 KlipperScreen for ViViD/MMS Ver 0.2.0011 的兼容性问题修复
+
+## Ver 0.1.0451
+
+- Swap SLOT mapping 映射的变更方式，分离为单层变动和递归变动两类
+
+## Ver 0.1.0450
+
+- Delivery 开放 sprint_speed/sprint_accel 参数作为用户配置项于 mms-motion.cfg 内新增
+  - 该速度/加速度配置用于短距离 deliver 运动和 Autoload 中
+- SLOT 变更 calibrate 后 deliver distance 的日志输出格式，用于修复 KlipperScreen Console 中未能正确显示 ->/<- 的问题
+- Resume 增加异常捕获，防止恢复过程中异常再次抛出后的系统 Shutdown 问题
+- Eject 增加同步方案最后的成功/失败判断，防止特殊情况下退料失败但仍然进入后续 Charge 流程的问题
+
 ## Ver 0.1.0449
 
 - RFID 修复单次直接读取函数未前置检查 enable 开关的问题
@@ -126,81 +146,81 @@
 
 - ChangeLog 补充
 
-## Ver 0.1.0414
+## Ver 0.1.414
 
 - 打印结束时注册的回调从 mms_eject 改为 mms_eject_unselect，即增加 unselect 功能
 
-## Ver 0.1.0413
+## Ver 0.1.413
 
 - Buffer 简化日志输出
 - Stepper wait_idle() 控制删除，is_running 软锁控制机制变更
 - Observer 新增 StepperInfo，在 Observer 中注册/管理 mms stepper 信息
 - Observer 新增 StepperRunningManager，负责在观察循环里检查注册 MMS 电机的运动状态，判断步进电机是否实际运动中（理论上同样可以用于判断是否抱死）
 
-## Ver 0.1.0412
+## Ver 0.1.412
 
 - Buffer/Delivery 优化日志输出
 - Delivery 增加管理调度定向定距离移动的统一方法，其他模块（如 Purge）对应逻辑更新
 
-## Ver 0.1.0411
+## Ver 0.1.411
 
 - 修复 Delivery wait stepper idle 相关 bug
 
-## Ver 0.1.0410
+## Ver 0.1.410
 
 - Selector refine calibration distance 可配置化
 - Endless Spool 未开启时逻辑更新
 
-## Ver 0.1.0409
+## Ver 0.1.409
 
 - MMS Stepper running/wait_idle/terminate 机制迭代
 - SLOT/SLOT_Pin Homing terminal 相关逻辑抽象至各模块自身职能范围内
 
-## Ver 0.1.0408
+## Ver 0.1.408
 
 - MMS Buffer feed/retract 小规模重构
 - 继续增加运动调度过程中对 distance/speed/accel 三个关键运动参数的强校验步骤
 - 修复非法运动参数导致 ManualMove.end_print_time 被错误赋空值导致的数学计算错误问题
 
-## Ver 0.1.0407
+## Ver 0.1.407
 
 - 修复 MMS Stepper ManualMove 运动方式在小距离移动调度时距离丢失的问题
 
-## Ver 0.1.0406
+## Ver 0.1.406
 
 - Delivery/Stepper 增加对 speed/accel 等运动参数的校验，防止非法负值/超大值/超小值的传入
 - 修正日志拼写错误
 
-## Ver 0.1.0405
+## Ver 0.1.405
 
 - Delivery 调整 Stepper:Selector 固定距离移动相关参数
 - Delivery 新增 MMS_TEST_SELECTOR，用于测试 Selector 移动的一致性
 - Delivery 新增 MMS_TEST_SELECTOR_MEASURE，用于测量 Pin:Selector 的可用触发区间
 - Stepper 增加运动结束后的距离监控日志输出
 
-## Ver 0.1.0404
+## Ver 0.1.404
 
 - bigtreetech-mms/hardware/mms-stepper.cfg 配置变更
 - Delivery Stepper:Selector 相关调度逻辑变更
 - Stepper 调度核心参数 interval_time 采用差分策略配置
 
-## Ver 0.1.0403
+## Ver 0.1.403
 
 - Stepper "Communication timeout during homing" 异常不再 Shutdown，改为上报业务层
 - Charge 变更 Careful Load 失败的异常处理逻辑，以适配 Stepper 的变动
 - Delivery Select SLOT 成功后终段的固定距离校准问题修复
 
-## Ver 0.1.0402
+## Ver 0.1.402
 
 - 增强 MMS Pause/Resume 的状态管理
 - 修复 Charge 失败暂停后用户手动停止打印，新打印任务中 Charge 再次失败后暂停被跳过的问题
 
-## Ver 0.1.0401
+## Ver 0.1.401
 
 - MMS Buffer 增强扩展 VVD/Buffer 场景下的日志输出
 - 修复 Extend 后多 Buffer 场景下，暂停恢复后 Monitor 错误监控 SLOT 导致送料异常问题
 
-## Ver 0.1.0400
+## Ver 0.1.400
 
 - 新增 MMS_MAN 命令，自动记录并输出由 MMS 创建的原生命令
 

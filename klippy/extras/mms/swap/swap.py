@@ -491,7 +491,15 @@ class MMSSwap:
     def update_mapping_slot_num(self, slot_num, slot_num_new):
         if slot_num in self.mapping:
             self.mapping[slot_num] = slot_num_new
+            self.log_info_s(
+                f"slot[{slot_num}] update with slot[{slot_num_new}]"
+                f" in swap mapping\n"
+                f"current swap mapping: {self.mapping}"
+            )
 
+    def update_mapping_slot_num_iter(self, slot_num, slot_num_new):
+        if slot_num in self.mapping:
+            self.mapping[slot_num] = slot_num_new
             for k,v in self.mapping.items():
                 if v == slot_num:
                     self.mapping[k] = slot_num_new

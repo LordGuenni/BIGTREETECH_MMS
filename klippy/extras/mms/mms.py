@@ -40,7 +40,7 @@ from .motion.resume import MMSResume
 @dataclass(frozen=True)
 class MMSConfig:
     # Current version
-    version: str = "0.1.0449"
+    version: str = "0.1.0453"
     # Welcome for MMS initail
     welcome: str = "*"*10 + f" MMS Ver {version} Ready for Action! " + "*"*10
 
@@ -1130,6 +1130,33 @@ class MMS:
 
     def cmd_MMS_TEST(self, gcmd):
         return
+
+        stepper_name = "manual_stepper drive_stepper"
+        tmc_obj_name = f"tmc2209 {stepper_name}"
+
+        printer = printer_adapter.get_printer()
+        tmc = printer.lookup_object(tmc_obj_name)
+
+        # sg_result = tmc.mcu_tmc.get_register("SG_RESULT")
+        # self.log_info(f"!!!!! sg_result:{sg_result}")
+
+        def get_sg_result():
+            sg_result = tmc.mcu_tmc.get_register("SG_RESULT")
+            self.log_info(f"!!!!! sg_result:{sg_result}")
+
+        sample_period = 0.5
+        sample_timeout = 60.0
+
+        p_task = PeriodicTask()
+        p_task.set_period(sample_period)
+        p_task.set_timeout(sample_timeout)
+
+        func = get_sg_result
+        try:
+            if p_task.schedule(func):
+                p_task.start()
+        except Exception as e:
+            self.log_error(f"p_task error:{e}")
 
 
 def load_config(config):

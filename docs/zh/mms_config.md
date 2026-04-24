@@ -94,6 +94,8 @@ log 日志相关配置, 默认配置遵循 klipper 规范, 请不要修改此配
 * **accel_selector**: 选料电机运动的加速度
 * **speed_drive**: 送料电机运动的速度, `mms-stepper.cfg` 中的传动距离为 `360/43`≈ 8.37mm/转, 所以默认的 80mm/s ≈ 9.56 转/秒
 * **accel_drive**: 送料电机运动的加速度
+* **sprint_speed**: 短距离移动速度
+* **sprint_accel**: 短距离移动加速度
 * **bowden_distance**: 耗材在 `Inlet` 到 `Buffer`, 或者 `Buffer` 到 `Extruder` 之间进退料时, 单次移动的最大长度。如果超出此长度后对应的传感器仍然没有触发, 则判定此次进退料异常。
 * **safety_retract_distance**: 耗材由 `Extruder` 退到 `Buffer` 时, `Gate` 传感器释放后, 再多退出 `safety_retract_distance` 长度的耗材, 使耗材远离 `Gate` 传感器, 从而避免 `Gate` 传感器处于`触发`/`释放`的临界状态导致的误报。
 * **slots_loop_times**: 执行 `MMS_SLOTS_LOOP` 自检命令时, 所有料槽自检的次数。4个料槽各进退料1次代表自检1次。

@@ -114,6 +114,8 @@ Moves the toolhead to a fixed cutter position to cut the filament.
 * **accel_selector**: Acceleration of the selector motor.
 * **speed_drive**: Movement speed of the drive motor. The transmission distance in `mms-stepper.cfg` is 360/43 ≈ 8.37mm/revolution, so the default 80mm/s ≈ 9.56 revolutions/second.
 * **accel_drive**: Acceleration of the drive motor.
+* **sprint_speed**: Movement speed for short distance.
+* **sprint_accel**: Movement acceleration for short distance.
 * **bowden_distance**: The maximum allowable single move distance for feeding or retracting between: `Inlet` to `Buffer`, or `Buffer` to `Extruder`. *If this distance is exceeded without the corresponding sensor being triggered, the operation is considered abnormal.
 * **safety_retract_distance**: After the `Gate` sensor is released during retract from `Extruder` to `Buffer`, an additional retraction of `safety_retract_distance` is performed，moving the filament away from the `Gate` sensor and preventing false triggers caused by the sensor being near its `trigger/release` threshold.
 * **slots_loop_times**: Specifies the number of self-test loops performed during an`MMS_SLOTS_LOOP`  command, where one loop consists of each slot feeding and retracting once.
