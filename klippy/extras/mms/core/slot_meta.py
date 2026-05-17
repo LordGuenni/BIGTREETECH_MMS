@@ -8,7 +8,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .slot_pin import PinType
 
@@ -37,6 +37,8 @@ class SlotFilamentMeta:
     # filament_color: Optional[str] = field(init=False, default=None)
     filament_color: Optional[str] = None
     filament_material: Optional[MaterialType] = None
+    spool_id: Optional[int] = None
+    filament_info: Dict[str, Any] = field(default_factory=dict)
 
 
 # class MaterialFactor(Enum):
@@ -104,6 +106,8 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
 
                 "filament_color" : self.filament_color,
                 "filament_material" : self.filament_material,
+                "spool_id" : self.spool_id,
+                "filament_info" : self.filament_info,
 
                 "deliver_vector": {
                     f"{pin}_{'forward' if direction else 'backward'}" : {

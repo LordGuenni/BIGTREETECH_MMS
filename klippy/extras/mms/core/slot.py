@@ -309,6 +309,12 @@ class MMSSlot:
     def set_filament_material(self, material):
         self.meta.filament_material = material
 
+    def set_spool_id(self, spool_id):
+        self.meta.spool_id = spool_id
+
+    def set_filament_info(self, info):
+        self.meta.filament_info = info or {}
+
     # ---- MMS LED support ----
     def get_led_name(self):
         return self.slot_config.led_name

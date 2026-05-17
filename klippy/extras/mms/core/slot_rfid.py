@@ -247,6 +247,16 @@ class SlotRFID:
             try:
                 self.tag_data = json.loads(data)
                 self.tag_color = self.tag_data.get("color_code")
+                self.mms_slot.set_filament_color(self.tag_color)
+                self.mms_slot.set_filament_material(
+                    self.tag_data.get("filament_material_type")
+                )
+                self.mms_slot.set_filament_info(self.tag_data)
+
+                mms = printer_adapter.get_mms()
+                if mms:
+                    mms.notify_lane_data_changed([self.slot_num])
+
                 # Set LED color
                 self.mms_slot.slot_led.rfid_set_color(self.tag_color)
             except Exception as e:

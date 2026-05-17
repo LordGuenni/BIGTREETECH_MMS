@@ -6,6 +6,7 @@
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from .adapters import (
     gcode_adapter,
@@ -235,6 +236,8 @@ class MMS:
     def _register_event(self):
         printer_adapter.register_klippy_connect(
             self._handle_klippy_connect)
+        printer_adapter.register_klippy_ready(
+            self._handle_klippy_ready)
         printer_adapter.register_klippy_shutdown(
             self._handle_klippy_shutdown)
         printer_adapter.register_klippy_disconnect(
@@ -249,6 +252,9 @@ class MMS:
         self._initialize_observer()
         self.welcome()
         self._is_connected = True
+
+    def _handle_klippy_ready(self):
+        self._moonraker_sync_lane_data()
 
     def _handle_klippy_shutdown(self):
         if self.mms_logger:
@@ -343,6 +349,7 @@ class MMS:
             # SLOT Meta
             ("MMS_SLOT_COLOR", self.cmd_MMS_SLOT_COLOR),
             ("MMS_SLOT_MATERIAL", self.cmd_MMS_SLOT_MATERIAL),
+            ("MMS_SLOT_SPOOL", self.cmd_MMS_SLOT_SPOOL),
 
             ("MMS_SLOT_META", self.cmd_MMS_SLOT_META),
             ("MMS_SLOT_META_TRUNCATE", self.cmd_MMS_SLOT_META_TRUNCATE),
@@ -901,6 +908,101 @@ class MMS:
             "dryer": self.mms_dryer.report(),
         } if self._is_connected else {}
 
+    def _find_slot_for_moonraker(self, slot_num):
+        mms_slot = self.get_mms_slot(slot_num)
+        return mms_slot if mms_slot and hasattr(mms_slot, "meta") else None
+
+    def _build_lane_data(self, mms_slot, scan_time):
+        slot_meta = mms_slot.meta
+        filament_info = slot_meta.filament_info or {}
+
+        nozzle_temp = (
+            filament_info.get("printing_temperature_min")
+            or filament_info.get("printing_temperature_max")
+            or filament_info.get("nozzle_temp")
+            or ""
+        )
+        bed_temp = (
+            filament_info.get("bed_temperature")
+            or filament_info.get("bed_temerature_max")
+            or filament_info.get("bed_temerature_min")
+            or ""
+        )
+        color = slot_meta.filament_color or filament_info.get("color_code") or ""
+        if isinstance(color, str):
+            color = color.lstrip("#")
+        material = (
+            slot_meta.filament_material
+            or filament_info.get("filament_material_type")
+            or ""
+        )
+        if hasattr(material, "value"):
+            material = material.value
+        spool_id = slot_meta.spool_id if slot_meta.spool_id and slot_meta.spool_id > 0 else None
+
+        is_empty = mms_slot.is_empty() and spool_id is None
+        if is_empty:
+            return {
+                "color": "",
+                "material": "",
+                "bed_temp": "",
+                "nozzle_temp": "",
+                "scan_time": "",
+                "td": "",
+                "lane": str(mms_slot.get_num()),
+                "spool_id": None,
+            }
+
+        return {
+            "color": color,
+            "material": material,
+            "bed_temp": bed_temp,
+            "nozzle_temp": nozzle_temp,
+            "scan_time": scan_time,
+            "td": 4.0,
+            "lane": str(mms_slot.get_num()),
+            "spool_id": spool_id,
+        }
+
+    def _moonraker_push_lane_data(self, slot_nums=None):
+        if not self._is_connected:
+            return
+        slot_nums = [s.get_num() for s in self.mms_slots] if slot_nums is None else slot_nums
+        if not slot_nums:
+            return
+
+        batch_data = {}
+        scan_time = datetime.now(timezone.utc).isoformat()
+        for slot_num in slot_nums:
+            mms_slot = self._find_slot_for_moonraker(slot_num)
+            if not mms_slot:
+                continue
+            batch_data[f"lane{slot_num}"] = self._build_lane_data(mms_slot, scan_time)
+
+        if not batch_data:
+            return
+
+        try:
+            webhooks = printer_adapter.get_obj("webhooks")
+            webhooks.call_remote_method("moonraker_push_lane_data", lane_data=batch_data)
+        except Exception as e:
+            self.log_info_s(f"failed to push lane data to Moonraker: {e}")
+
+    def _moonraker_sync_lane_data(self):
+        self._moonraker_push_lane_data()
+
+        try:
+            webhooks = printer_adapter.get_obj("webhooks")
+            webhooks.call_remote_method(
+                "moonraker_cleanup_lane_data",
+                num_gates=len(self.mms_slots),
+            )
+        except Exception as e:
+            self.log_info_s(f"failed to cleanup lane data in Moonraker: {e}")
+
+    def notify_lane_data_changed(self, slot_nums=None):
+        self._moonraker_push_lane_data(slot_nums=slot_nums)
+
     def log_status(self, silent=True):
         # Log stepper status if needed
         self.log_status_stepper(silent=True)
@@ -1044,6 +1146,7 @@ class MMS:
         color_code = gcmd.get("CODE")
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.set_filament_color(color_code)
+        self.notify_lane_data_changed([slot_num])
 
     def cmd_MMS_SLOT_MATERIAL(self, gcmd):
         """
@@ -1057,6 +1160,22 @@ class MMS:
         material = gcmd.get("MATERIAL")
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.set_filament_material(material)
+        self.notify_lane_data_changed([slot_num])
+
+    def cmd_MMS_SLOT_SPOOL(self, gcmd):
+        """
+        Usage:
+            MMS_SLOT_SPOOL SLOT=0 SPOOL_ID=123
+            MMS_SLOT_SPOOL SLOT=0 SPOOL_ID=-1
+        """
+        slot_num = gcmd.get_int("SLOT", minval=0)
+        if not self.slot_is_available(slot_num):
+            return
+
+        spool_id = gcmd.get_int("SPOOL_ID", default=-1)
+        mms_slot = self.get_mms_slot(slot_num)
+        mms_slot.set_spool_id(spool_id)
+        self.notify_lane_data_changed([slot_num])
 
     def cmd_MMS_DRYER_START(self, gcmd):
         """
