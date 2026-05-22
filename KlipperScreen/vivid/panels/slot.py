@@ -81,24 +81,19 @@ class Panel(ScreenPanel):
         self.overlay.show_all()
 
     def _show_modal(self, content, style_class="vvd-modal-overlay"):
-        # Create an EventBox to act as the full-screen semi-transparent backdrop
-        # EventBox is used because it handles background colors and events better than a bare Box
-        modal_overlay = Gtk.EventBox()
+        # Simple Box that fills the entire overlay area
+        modal_overlay = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         modal_overlay.get_style_context().add_class(style_class)
         modal_overlay.set_hexpand(True)
         modal_overlay.set_vexpand(True)
+        modal_overlay.set_halign(Gtk.Align.FILL)
+        modal_overlay.set_valign(Gtk.Align.FILL)
         
-        # Internal container for centering
-        centering_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        centering_box.set_valign(Gtk.Align.CENTER)
-        centering_box.set_halign(Gtk.Align.CENTER)
-        centering_box.set_hexpand(True)
-        centering_box.set_vexpand(True)
+        # Center the content box within this filling container
+        content.set_valign(Gtk.Align.CENTER)
+        content.set_halign(Gtk.Align.CENTER)
         
-        centering_box.add(content)
-        modal_overlay.add(centering_box)
-        
-        # Add to the overlay
+        modal_overlay.add(content)
         self.overlay.add_overlay(modal_overlay)
         self.modal_overlay = modal_overlay
         self.overlay.show_all()
@@ -106,6 +101,7 @@ class Panel(ScreenPanel):
 
     def _close_modal(self, modal_widget):
         self.overlay.remove(modal_widget)
+        self.modal_overlay = None
 
     # ---- Material Components ----
     def create_material_scroll(self):
@@ -487,17 +483,16 @@ class Panel(ScreenPanel):
         content_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=10,
-            hexpand=True,
-            vexpand=True,
+            hexpand=False,
+            vexpand=False,
         )
         content_box.get_style_context().add_class("vvd-modal-box")
         content_box.set_size_request(screen_width * 0.8, -1)
         content_box.pack_start(grid, True, True, 20)
 
         def show_keyboard(entry):
-            # Use the modal overlay as the shift target
-            if hasattr(self, "modal_overlay") and self.modal_overlay:
-                self._screen.show_keyboard(entry=entry, box=self.modal_overlay)
+            # Using self.content is the standard KlipperScreen way to shift the whole panel
+            self._screen.show_keyboard(entry=entry, box=self.content)
             return False
 
         def add_row(row, label_text, entry_text, input_purpose=None):
@@ -566,11 +561,11 @@ class Panel(ScreenPanel):
             )
             self._screen._ws.klippy.gcode_script(script)
             
-            self._screen.remove_keyboard(box=self.modal_overlay)
+            self._screen.remove_keyboard(box=self.content)
             self._close_modal(modal_widget)
 
         cancel_btn.connect("clicked", lambda w: (
-            self._screen.remove_keyboard(box=self.modal_overlay),
+            self._screen.remove_keyboard(box=self.content),
             self._close_modal(modal_widget)
         ))
         save_btn.connect("clicked", lambda w: save_details())
