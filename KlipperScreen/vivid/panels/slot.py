@@ -93,6 +93,7 @@ class Panel(ScreenPanel):
         
         modal_overlay.add(content)
         self.overlay.add_overlay(modal_overlay)
+        self.modal_overlay = modal_overlay
         self.overlay.show_all()
         return modal_overlay
 
@@ -486,10 +487,12 @@ class Panel(ScreenPanel):
         content_box.set_size_request(screen_width * 0.8, -1)
         content_box.pack_start(grid, True, True, 20)
 
+        # Show modal first so it is in the widget hierarchy
+        modal_widget = self._show_modal(content_box)
+
         def show_keyboard(entry):
-            # Use self.content (the whole panel) as the box to shift
-            # This is most reliable for keyboard behavior in KlipperScreen
-            self._screen.show_keyboard(entry=entry, box=self.content)
+            # Pass the modal_widget to show_keyboard so KlipperScreen can shift it
+            self._screen.show_keyboard(entry=entry, box=modal_widget)
             return False
 
         def add_row(row, label_text, entry_text, input_purpose=None):
@@ -522,8 +525,6 @@ class Panel(ScreenPanel):
         action_bar.attach(cancel_btn, 0, 0, 1, 1)
         action_bar.attach(save_btn, 1, 0, 1, 1)
         grid.attach(action_bar, 0, 4, 2, 1)
-
-        modal_widget = self._show_modal(content_box)
 
         def save_details():
             vendor_val = vendor_entry.get_text().strip()
