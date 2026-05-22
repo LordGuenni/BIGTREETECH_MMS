@@ -375,20 +375,66 @@ class Panel(ScreenPanel):
         slot_data = lane_data.get(f"lane{self.slot_num}")
         return slot_data if isinstance(slot_data, dict) else None
 
+    def _get_mms_metadata(self):
+        client = getattr(self._screen, "apiclient", None)
+        if not client:
+            return None
+        # Query Klipper directly for mms object status
+        method = "printer/objects/query?mms"
+        result = client.send_request(method)
+        if result is False:
+            return None
+        
+        mms_data = result.get("status", {}).get("mms", {})
+        slots_data = mms_data.get("slots", {})
+        slot_data = slots_data.get(str(self.slot_num))
+        if not slot_data:
+            return None
+        
+        # Extract filament info
+        info = slot_data.get("filament_info", {})
+        vendor = info.get("filament_manufacturer")
+        name = info.get("filament_type_detailed") or info.get("color_name_a")
+        nozzle_temp = info.get("nozzle_temp")
+        bed_temp = info.get("bed_temperature")
+        
+        # Fallback to direct fields if info is sparse
+        if not vendor:
+            vendor = slot_data.get("filament_vendor")
+        if not name:
+            name = slot_data.get("filament_name")
+        
+        return {
+            "vendor": vendor,
+            "name": name,
+            "nozzle_temp": nozzle_temp,
+            "bed_temp": bed_temp
+        }
+
     def show_details_window(self):
         vendor, name, nozzle_temp, bed_temp = self.cfg_manager.get_slot_details(
             self.slot_num
         )
-        lane_data = self._get_lane_data()
-        if lane_data:
-            vendor = self._coalesce_detail_value(
-                lane_data.get("vendor_name"), vendor)
-            name = self._coalesce_detail_value(
-                lane_data.get("name"), name)
-            nozzle_temp = self._coalesce_detail_value(
-                lane_data.get("nozzle_temp"), nozzle_temp)
-            bed_temp = self._coalesce_detail_value(
-                lane_data.get("bed_temp"), bed_temp)
+        
+        # Try metadata from Klipper first
+        meta = self._get_mms_metadata()
+        if meta:
+            vendor = self._coalesce_detail_value(meta.get("vendor"), vendor)
+            name = self._coalesce_detail_value(meta.get("name"), name)
+            nozzle_temp = self._coalesce_detail_value(meta.get("nozzle_temp"), nozzle_temp)
+            bed_temp = self._coalesce_detail_value(meta.get("bed_temp"), bed_temp)
+        else:
+            # Fallback to Moonraker lane_data
+            lane_data = self._get_lane_data()
+            if lane_data:
+                vendor = self._coalesce_detail_value(
+                    lane_data.get("vendor_name"), vendor)
+                name = self._coalesce_detail_value(
+                    lane_data.get("name"), name)
+                nozzle_temp = self._coalesce_detail_value(
+                    lane_data.get("nozzle_temp"), nozzle_temp)
+                bed_temp = self._coalesce_detail_value(
+                    lane_data.get("bed_temp"), bed_temp)
 
         screen = self._screen.get_screen()
         screen_width = screen.get_width()
@@ -402,16 +448,18 @@ class Panel(ScreenPanel):
             hexpand=True,
             vexpand=True,
         )
-        content = Gtk.Box(
+        
+        # Wrap grid in a box that will be passed to show_keyboard
+        content_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=10,
             hexpand=True,
             vexpand=True,
         )
-        content.pack_start(grid, True, True, 0)
+        content_box.pack_start(grid, True, True, 0)
 
         def show_keyboard(entry):
-            self._screen.show_keyboard(entry=entry, box=content)
+            self._screen.show_keyboard(entry=entry, box=content_box)
             return False
 
         def add_row(row, label_text, entry_text, input_purpose=None):
@@ -445,16 +493,11 @@ class Panel(ScreenPanel):
         action_bar.attach(save_btn, 1, 0, 1, 1)
         grid.attach(action_bar, 0, 4, 2, 1)
 
-        window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-        window.set_title(f"Slot {self.slot_num} Details")
-        window.set_position(Gtk.WindowPosition.CENTER)
-        window.set_default_size(screen_width / 1.5, screen_height / 1.5)
-        window.set_modal(True)
-        window.add(content)
-
-        def close_window():
-            self._screen.remove_keyboard(box=content)
-            window.destroy()
+        close_popup = create_popup_window(
+            f"Slot {self.slot_num} Details", 
+            content_box, 
+            "vvd-slot-details-window"
+        )
 
         def save_details():
             vendor_val = vendor_entry.get_text().strip()
@@ -487,12 +530,15 @@ class Panel(ScreenPanel):
                 f" BED_TEMP={bed_text if bed_text else empty_str}"
             )
             self._screen._ws.klippy.gcode_script(script)
-            close_window()
+            
+            self._screen.remove_keyboard(box=content_box)
+            close_popup()
 
-        cancel_btn.connect("clicked", lambda w: close_window())
+        cancel_btn.connect("clicked", lambda w: (
+            self._screen.remove_keyboard(box=content_box),
+            close_popup()
+        ))
         save_btn.connect("clicked", lambda w: save_details())
-
-        window.show_all()
 
     def mms_slot_action(self, script):
         """Execute GCode command for slot action"""

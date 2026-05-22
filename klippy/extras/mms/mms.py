@@ -884,7 +884,7 @@ class MMS:
     def get_status(self, eventtime=None):
         return {
             "slots" : {
-                slot.get_num() : slot.meta.report()
+                slot.get_num() : slot.get_status(eventtime)
                 for slot in self.mms_slots
             },
             "steppers" : {
