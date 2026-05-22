@@ -354,10 +354,41 @@ class Panel(ScreenPanel):
             logging.error(f"Invalid {field_name} value: {value}")
             return "__invalid__"
 
+    def _coalesce_detail_value(self, value, fallback):
+        if value is None:
+            return fallback
+        if isinstance(value, str):
+            value = value.strip()
+            return value if value else fallback
+        return str(value)
+
+    def _get_lane_data(self):
+        client = getattr(self._screen, "apiclient", None)
+        if not client:
+            return None
+        lane_result = client.send_request("server/database/item?namespace=lane_data")
+        if not lane_result or not isinstance(lane_result, dict):
+            return None
+        lane_data = lane_result.get("value", lane_result)
+        if not isinstance(lane_data, dict):
+            return None
+        slot_data = lane_data.get(f"lane{self.slot_num}")
+        return slot_data if isinstance(slot_data, dict) else None
+
     def show_details_window(self):
         vendor, name, nozzle_temp, bed_temp = self.cfg_manager.get_slot_details(
             self.slot_num
         )
+        lane_data = self._get_lane_data()
+        if lane_data:
+            vendor = self._coalesce_detail_value(
+                lane_data.get("vendor_name"), vendor)
+            name = self._coalesce_detail_value(
+                lane_data.get("name"), name)
+            nozzle_temp = self._coalesce_detail_value(
+                lane_data.get("nozzle_temp"), nozzle_temp)
+            bed_temp = self._coalesce_detail_value(
+                lane_data.get("bed_temp"), bed_temp)
 
         screen = self._screen.get_screen()
         screen_width = screen.get_width()
@@ -371,20 +402,39 @@ class Panel(ScreenPanel):
             hexpand=True,
             vexpand=True,
         )
+        content = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=10,
+            hexpand=True,
+            vexpand=True,
+        )
+        content.pack_start(grid, True, True, 0)
 
-        def add_row(row, label_text, entry_text):
+        def show_keyboard(entry):
+            self._screen.show_keyboard(entry=entry, box=content)
+            return False
+
+        def add_row(row, label_text, entry_text, input_purpose=None):
             label = VLabel(content=label_text, size=font_size)
             entry = Gtk.Entry()
             entry.set_text(entry_text or "")
             entry.set_hexpand(True)
+            if input_purpose is not None:
+                entry.set_input_purpose(input_purpose)
             grid.attach(label, 0, row, 1, 1)
             grid.attach(entry, 1, row, 1, 1)
+            entry.connect("focus-in-event", lambda w, e: show_keyboard(w))
+            entry.connect("button-press-event", lambda w, e: show_keyboard(w))
             return entry
 
-        vendor_entry = add_row(0, "Vendor", vendor)
-        name_entry = add_row(1, "Name", name)
-        nozzle_entry = add_row(2, "Nozzle Temp", nozzle_temp)
-        bed_entry = add_row(3, "Bed Temp", bed_temp)
+        vendor_entry = add_row(
+            0, "Vendor", vendor, Gtk.InputPurpose.FREE_FORM)
+        name_entry = add_row(
+            1, "Name", name, Gtk.InputPurpose.FREE_FORM)
+        nozzle_entry = add_row(
+            2, "Nozzle Temp", nozzle_temp, Gtk.InputPurpose.NUMBER)
+        bed_entry = add_row(
+            3, "Bed Temp", bed_temp, Gtk.InputPurpose.NUMBER)
 
         action_bar = Gtk.Grid(
             row_homogeneous=True, column_homogeneous=True, margin_top=10
@@ -400,9 +450,10 @@ class Panel(ScreenPanel):
         window.set_position(Gtk.WindowPosition.CENTER)
         window.set_default_size(screen_width / 1.5, screen_height / 1.5)
         window.set_modal(True)
-        window.add(grid)
+        window.add(content)
 
         def close_window():
+            self._screen.remove_keyboard(box=content)
             window.destroy()
 
         def save_details():
