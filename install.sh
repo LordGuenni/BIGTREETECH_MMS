@@ -178,14 +178,14 @@ self_update() {
             # On a branch (if using tags we will be detached)
             git pull --quiet --force origin $BRANCH
         fi
-        GIT_VER=$(git describe --tags)
+        GIT_VER=$(git describe --tags --always)
         log_echo "${B_GREEN}Now on git version ${GIT_VER}"
         log_echo "${B_GREEN}Running the new install script..."
         cd - >/dev/null
         exec "$SCRIPTNAME" "${ARGS[@]}"
         exit 0 weg# Exit this old instance
     fi
-    GIT_VER=$(git describe --tags)
+    GIT_VER=$(git describe --tags --always)
     log_echo "${B_GREEN}Already the latest version: ${GIT_VER}"
 }
 
@@ -217,7 +217,7 @@ verify_version() {
         fi
 
         if [ ! -z "${err_oldest}" ] || [ ! -z "${err_lastest}" ]; then
-            local commit_id=$(git -C ${dir} describe --tags)
+            local commit_id=$(git -C ${dir} describe --tags --always)
             log_echo "${TITLE}${SECTION}"
             log_echo "${WARNING}Your ${name} version is: ${PURPLE}${commit_id}${WARNING}
 not between ${PURPLE}${oldest}${WARNING} and ${PURPLE}${latest}${WARNING}
@@ -359,7 +359,7 @@ set_klipper_screen() {
 }
 
 get_version() {
-    VIVID_VER=$(git describe --tags)
+    VIVID_VER=$(git describe --tags --always)
     log_echo "${TITLE}${SECTION}"
     log_echo "${INFO}ViViD script: ${B_GREEN}${VIVID_VER}"
     log_echo "${INFO}Klipper: ${B_GREEN}${KLIPPY_VERSION}"
