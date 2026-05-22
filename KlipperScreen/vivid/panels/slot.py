@@ -513,6 +513,10 @@ class Panel(ScreenPanel):
         cancel_btn = HorButton(label=VLabel(content="Cancel", size=font_size*0.8))
         confirm_btn = HorButton(label=VLabel(content="Confirm", size=font_size*0.8))
         
+        # Add borders/styling
+        cancel_btn.get_style_context().add_class("vvd-slot-ctrl-btn")
+        confirm_btn.get_style_context().add_class("vvd-slot-ctrl-btn")
+        
         btn_box.pack_start(cancel_btn, False, False, 0)
         btn_box.pack_start(confirm_btn, False, False, 0)
         edit_view.pack_start(btn_box, False, False, 0)
