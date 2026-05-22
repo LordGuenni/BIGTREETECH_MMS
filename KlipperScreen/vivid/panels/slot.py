@@ -81,13 +81,15 @@ class Panel(ScreenPanel):
         self.overlay.show_all()
 
     def _show_modal(self, content, style_class="vvd-modal-overlay"):
-        # Create a semi-transparent background
+        # Create a semi-transparent background that fills the entire overlay
         modal_overlay = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        modal_overlay.set_hexpand(True)
+        modal_overlay.set_vexpand(True)
         modal_overlay.get_style_context().add_class(style_class)
         
-        # Center the content
-        modal_overlay.set_valign(Gtk.Align.CENTER)
-        modal_overlay.set_halign(Gtk.Align.CENTER)
+        # Center the content box within the overlay
+        content.set_valign(Gtk.Align.CENTER)
+        content.set_halign(Gtk.Align.CENTER)
         
         modal_overlay.add(content)
         self.overlay.add_overlay(modal_overlay)
@@ -479,14 +481,15 @@ class Panel(ScreenPanel):
             spacing=10,
             hexpand=False,
             vexpand=False,
-            margin=30,
         )
         content_box.get_style_context().add_class("vvd-modal-box")
-        content_box.set_size_request(screen_width * 0.8, screen_height * 0.6)
-        content_box.pack_start(grid, True, True, 0)
+        content_box.set_size_request(screen_width * 0.8, -1)
+        content_box.pack_start(grid, True, True, 20)
 
         def show_keyboard(entry):
-            self._screen.show_keyboard(entry=entry, box=content_box)
+            # Use self.content (the whole panel) as the box to shift
+            # This is most reliable for keyboard behavior in KlipperScreen
+            self._screen.show_keyboard(entry=entry, box=self.content)
             return False
 
         def add_row(row, label_text, entry_text, input_purpose=None):
@@ -574,6 +577,7 @@ class Panel(ScreenPanel):
 
     def deactivate(self):
         # logging.info("==== ViViD slot panel deactivate! ====")
+        self._screen.remove_keyboard(box=self.content)
         # Save new config
         self.cfg_manager.manual_save()
 
