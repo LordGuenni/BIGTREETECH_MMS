@@ -134,7 +134,9 @@ class VividConfigManager:
         for section, options in self._config_cache.items():
             parser.add_section(section)
             for option, value in options.items():
-                parser.set(section, option, value)
+                # Ensure value is a string for configparser
+                val_str = "" if value is None else str(value)
+                parser.set(section, option, val_str)
 
         # Write to disk
         with open(self._config_path, 'w') as f:
