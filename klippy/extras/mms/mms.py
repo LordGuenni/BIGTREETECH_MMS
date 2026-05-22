@@ -920,21 +920,21 @@ class MMS:
             filament_info.get("printing_temperature_min")
             or filament_info.get("printing_temperature_max")
             or filament_info.get("nozzle_temp")
-            or ""
+            or None
         )
         bed_temp = (
             filament_info.get("bed_temperature")
             or filament_info.get("bed_temerature_max")
             or filament_info.get("bed_temerature_min")
-            or ""
+            or None
         )
-        color = slot_meta.filament_color or filament_info.get("color_code") or ""
+        color = slot_meta.filament_color or filament_info.get("color_code") or None
         if isinstance(color, str):
             color = color.lstrip("#")
         material = (
             slot_meta.filament_material
             or filament_info.get("filament_material_type")
-            or ""
+            or None
         )
         if hasattr(material, "value"):
             material = material.value
@@ -943,17 +943,26 @@ class MMS:
         is_empty = mms_slot.is_empty() and spool_id is None
         if is_empty:
             return {
-                "color": "",
-                "material": "",
-                "bed_temp": "",
-                "nozzle_temp": "",
-                "scan_time": "",
-                "td": "",
+                "vendor_name": None,
+                "name": None,
+                "color": None,
+                "material": None,
+                "bed_temp": None,
+                "nozzle_temp": None,
+                "scan_time": None,
+                "td": None,
                 "lane": str(mms_slot.get_num()),
                 "spool_id": None,
+                "filament_id": None,
             }
 
         return {
+            "vendor_name": filament_info.get("filament_manufacturer") or None,
+            "name": (
+                filament_info.get("filament_type_detailed")
+                or filament_info.get("color_name_a")
+                or None
+            ),
             "color": color,
             "material": material,
             "bed_temp": bed_temp,
@@ -962,6 +971,7 @@ class MMS:
             "td": 4.0,
             "lane": str(mms_slot.get_num()),
             "spool_id": spool_id,
+            "filament_id": filament_info.get("filament_id") or None,
         }
 
     def _moonraker_push_lane_data(self, slot_nums=None):

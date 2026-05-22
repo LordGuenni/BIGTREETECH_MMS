@@ -163,6 +163,10 @@ class Panel(ScreenPanel):
         # Update config manager cache
         self.cfg_manager.update_slot_material(self.slot_num, material)
 
+        # Sync to Klipper
+        script = f"MMS_SLOT_MATERIAL SLOT={self.slot_num} MATERIAL='{material}'"
+        self._screen._ws.klippy.gcode_script(script)
+
     # ---- Color Palette Components ----
     def create_color_palette(self):
         """Create a color selection grid"""
@@ -223,8 +227,13 @@ class Panel(ScreenPanel):
         # Update config manager cache
         self.cfg_manager.update_slot_color(self.slot_num, new_color)
 
+        # Sync to Klipper
+        color_hex = new_color[1:] if new_color.startswith("#") else new_color
+        script = f"MMS_SLOT_COLOR SLOT={self.slot_num} CODE='#{color_hex}'"
+        self._screen._ws.klippy.gcode_script(script)
+
         # Update hardware LED color
-        # self.mms_update_slot_led(new_color)
+        self.mms_update_slot_led(new_color)
 
     def mms_update_slot_led(self, color):
         """Update hardware LED color (strip '#' prefix)"""
