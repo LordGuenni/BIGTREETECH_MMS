@@ -555,8 +555,10 @@ class Panel(ScreenPanel):
 
     # ---- Panel life ----
     def activate(self):
-        selecting_slot_num = []
+        # Sync with Klipper state
+        self.sync_with_klipper()
 
+        selecting_slot_num = []
         mms_selectors = self.mms_controller.get_mms_selectors()
         for index,status_dct in mms_selectors.items():
             # Focusing slot is not None
@@ -573,6 +575,46 @@ class Panel(ScreenPanel):
         # Play select animation
         for slot_num in set(selecting_slot_num):
             self.select_slot_button(slot_num)
+
+    def sync_with_klipper(self):
+        """Synchronize local configuration with Klipper's MMS state"""
+        slots_data = self.mms_controller.get_mms_slots()
+        if not slots_data:
+            return
+
+        for slot_num_str, slot_data in slots_data.items():
+            slot_num = int(slot_num_str)
+            
+            # Sync Color
+            color = slot_data.get("filament_color")
+            if color:
+                if not color.startswith("#"):
+                    color = f"#{color}"
+                self.cfg_manager.update_slot_color(slot_num, color)
+            
+            # Sync Material
+            material = slot_data.get("filament_material")
+            if material:
+                self.cfg_manager.update_slot_material(slot_num, material)
+            
+            # Sync Details
+            info = slot_data.get("filament_info", {})
+            vendor = info.get("filament_manufacturer", "")
+            name = info.get("filament_type_detailed") or info.get("color_name_a") or ""
+            nozzle_temp = info.get("nozzle_temp", "")
+            bed_temp = info.get("bed_temperature", "")
+            
+            self.cfg_manager.update_slot_details(
+                slot_num, vendor, name, nozzle_temp, bed_temp
+            )
+            
+            # Update UI button state
+            is_empty = slot_data.get("is_empty", False)
+            self.update_slot_empty(slot_num, is_empty)
+            
+            # If not empty, force refresh to show correctly synced values
+            if not is_empty and color and material:
+                self.refresh_slot_button(slot_num, color, material)
 
     def deactivate(self):
         for slot_num in self.slot_buttons:
