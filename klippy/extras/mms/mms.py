@@ -350,6 +350,7 @@ class MMS:
             ("MMS_SLOT_COLOR", self.cmd_MMS_SLOT_COLOR),
             ("MMS_SLOT_MATERIAL", self.cmd_MMS_SLOT_MATERIAL),
             ("MMS_SLOT_SPOOL", self.cmd_MMS_SLOT_SPOOL),
+            ("MMS_SLOT_MAP", self.cmd_MMS_SLOT_MAP),
 
             ("MMS_SLOT_META", self.cmd_MMS_SLOT_META),
             ("MMS_SLOT_META_TRUNCATE", self.cmd_MMS_SLOT_META_TRUNCATE),
@@ -1186,6 +1187,256 @@ class MMS:
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.set_spool_id(spool_id)
         self.notify_lane_data_changed([slot_num])
+
+    def _normalize_slot_map_value(self, value):
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value if value else None
+
+    def _parse_slot_map_targets(self, gate, gates_param):
+        gates = []
+        if gate is not None:
+            gates.append(gate)
+        if gates_param:
+            for item in gates_param.split(","):
+                item = item.strip()
+                if not item:
+                    continue
+                try:
+                    gates.append(int(item))
+                except ValueError:
+                    self.log_error(
+                        f"MMS_SLOT_MAP invalid GATES entry: '{item}'")
+                    return None
+
+        if not gates:
+            return []
+
+        seen = set()
+        uniq = []
+        for gate_num in gates:
+            if gate_num not in seen:
+                seen.add(gate_num)
+                uniq.append(gate_num)
+        return uniq
+
+    def _get_slot_map_fields(self, mms_slot):
+        slot_meta = mms_slot.meta
+        filament_info = slot_meta.filament_info or {}
+        material = (
+            slot_meta.filament_material
+            or filament_info.get("filament_material_type")
+            or None
+        )
+        if hasattr(material, "value"):
+            material = material.value
+        color = slot_meta.filament_color or filament_info.get("color_code") or None
+        vendor = filament_info.get("filament_manufacturer") or None
+        name = (
+            filament_info.get("filament_type_detailed")
+            or filament_info.get("color_name_a")
+            or None
+        )
+        return vendor, name, material, color
+
+    def _format_slot_map(self, detail=False):
+        def fmt(value):
+            return value if value not in (None, "") else "-"
+
+        lines = ["MMS Slot Map:"]
+        for mms_slot in sorted(self.mms_slots, key=lambda s: s.get_num()):
+            vendor, name, material, color = self._get_slot_map_fields(mms_slot)
+            line = (
+                f"Slot {mms_slot.get_num()}: "
+                f"material={fmt(material)} "
+                f"color={fmt(color)} "
+                f"name={fmt(name)} "
+                f"vendor={fmt(vendor)}"
+            )
+            if detail:
+                filament_id = (
+                    mms_slot.meta.filament_info.get("filament_id") if
+                    mms_slot.meta.filament_info else None
+                )
+                line += (
+                    f" spool_id={fmt(mms_slot.meta.spool_id)}"
+                    f" filament_id={fmt(filament_id)}"
+                )
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _apply_slot_map_updates(
+        self,
+        mms_slot,
+        vendor,
+        vendor_set,
+        name,
+        name_set,
+        material,
+        material_set,
+        color,
+        color_set,
+        reset,
+    ):
+        filament_info = dict(mms_slot.meta.filament_info or {})
+        updated = False
+
+        if reset:
+            for key in (
+                "filament_manufacturer",
+                "filament_type_detailed",
+                "color_name_a",
+                "color_code",
+                "filament_material_type",
+            ):
+                if key in filament_info:
+                    filament_info.pop(key, None)
+                    updated = True
+            if mms_slot.meta.filament_color is not None:
+                mms_slot.set_filament_color(None)
+                updated = True
+            if mms_slot.meta.filament_material is not None:
+                mms_slot.set_filament_material(None)
+                updated = True
+
+        if vendor_set:
+            if vendor is None:
+                if "filament_manufacturer" in filament_info:
+                    filament_info.pop("filament_manufacturer", None)
+                    updated = True
+            else:
+                filament_info["filament_manufacturer"] = vendor
+                updated = True
+
+        if name_set:
+            if name is None:
+                if "filament_type_detailed" in filament_info:
+                    filament_info.pop("filament_type_detailed", None)
+                    updated = True
+                if "color_name_a" in filament_info:
+                    filament_info.pop("color_name_a", None)
+                    updated = True
+            else:
+                filament_info["filament_type_detailed"] = name
+                updated = True
+
+        if material_set:
+            if material is None:
+                if mms_slot.meta.filament_material is not None:
+                    mms_slot.set_filament_material(None)
+                    updated = True
+                if "filament_material_type" in filament_info:
+                    filament_info.pop("filament_material_type", None)
+                    updated = True
+            else:
+                mms_slot.set_filament_material(material)
+                filament_info["filament_material_type"] = material
+                updated = True
+
+        if color_set:
+            if color is None:
+                if mms_slot.meta.filament_color is not None:
+                    mms_slot.set_filament_color(None)
+                    updated = True
+                if "color_code" in filament_info:
+                    filament_info.pop("color_code", None)
+                    updated = True
+            else:
+                mms_slot.set_filament_color(color)
+                filament_info["color_code"] = color
+                updated = True
+
+        if updated:
+            mms_slot.set_filament_info(filament_info)
+
+        return updated
+
+    def cmd_MMS_SLOT_MAP(self, gcmd):
+        """
+        Usage:
+            MMS_SLOT_MAP
+            MMS_SLOT_MAP GATE=0 MATERIAL='PETG' COLOR='FF0000' NAME='PETG HF Black Red' VENDOR='Bambu'
+            MMS_SLOT_MAP GATES=0,1,2,3 MATERIAL='PETG'
+            MMS_SLOT_MAP RESET=1
+        """
+        gate = gcmd.get_int("GATE", default=None)
+        slot = gcmd.get_int("SLOT", default=None)
+        gates_param = gcmd.get("GATES", default=None)
+        slots_param = gcmd.get("SLOTS", default=None)
+        quiet = gcmd.get_int("QUIET", default=0)
+        detail = gcmd.get_int("DETAIL", default=0)
+        reset = gcmd.get_int("RESET", default=0)
+
+        vendor_raw = gcmd.get("VENDOR", default=None)
+        name_raw = gcmd.get("NAME", default=None)
+        material_raw = gcmd.get("MATERIAL", default=None)
+        color_raw = gcmd.get("COLOR", default=None)
+
+        vendor_set = vendor_raw is not None
+        name_set = name_raw is not None
+        material_set = material_raw is not None
+        color_set = color_raw is not None
+
+        vendor = self._normalize_slot_map_value(vendor_raw)
+        name = self._normalize_slot_map_value(name_raw)
+        material = self._normalize_slot_map_value(material_raw)
+        color = self._normalize_slot_map_value(color_raw)
+
+        if slot is not None:
+            if gate is not None and gate != slot:
+                self.log_error("MMS_SLOT_MAP GATE and SLOT must match")
+                return
+            gate = slot
+
+        if slots_param:
+            if gates_param:
+                gates_param = f"{gates_param},{slots_param}"
+            else:
+                gates_param = slots_param
+
+        has_updates = any(
+            [vendor_set, name_set, material_set, color_set, reset])
+        has_gate = gate is not None or gates_param is not None
+
+        if not has_updates and not has_gate:
+            if not quiet:
+                self.log_info(self._format_slot_map(detail=detail))
+            return
+
+        if not has_gate:
+            self.log_error("MMS_SLOT_MAP requires GATE/GATES or SLOT/SLOTS to update")
+            return
+
+        gates = self._parse_slot_map_targets(gate, gates_param)
+        if gates is None:
+            return
+
+        updated_slots = []
+        for gate_num in gates:
+            if not self.slot_is_available(gate_num):
+                continue
+            mms_slot = self.get_mms_slot(gate_num)
+            updated = self._apply_slot_map_updates(
+                mms_slot,
+                vendor,
+                vendor_set,
+                name,
+                name_set,
+                material,
+                material_set,
+                color,
+                color_set,
+                reset,
+            )
+            if updated:
+                updated_slots.append(gate_num)
+
+        if updated_slots:
+            self.notify_lane_data_changed(updated_slots)
+
+        if not quiet:
+            self.log_info(self._format_slot_map(detail=detail))
 
     def cmd_MMS_DRYER_START(self, gcmd):
         """
