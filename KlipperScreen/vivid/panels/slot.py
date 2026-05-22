@@ -461,7 +461,8 @@ class Panel(ScreenPanel):
             val_lbl.set_hexpand(True)
             
             edit_btn = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
-            edit_img = VImage("vivid_edit", size=font_size*1.2)
+            img_size = int(font_size * 1.2)
+            edit_img = VImage("vivid_edit.svg", width=img_size, height=img_size)
             edit_btn.set_image(edit_img)
             
             grid.attach(lbl, 0, row, 1, 1)
