@@ -51,10 +51,6 @@ class Panel(ScreenPanel):
 
     def build_ui(self):
         """Build the main UI structure"""
-        # Main container with overlay for modals
-        self.overlay = Gtk.Overlay()
-        self.content.add(self.overlay)
-
         # Top area: Material scroll and Color palette
         top_area = create_section_container("vvd-slotpanel-area-top")
         top_area.attach(self.create_material_scroll(), 0, 0, 1, 1)
@@ -67,41 +63,27 @@ class Panel(ScreenPanel):
         bottom_area.attach(slot_control, 0, 0, 1, 1)
         bottom_area.attach(self.create_details_bar(), 0, 1, 1, 1)
 
-        # Main grid layout
-        self.main_grid = Gtk.Grid(
+        # Main grid layout (Main View)
+        self.main_view = Gtk.Grid(
             row_homogeneous=False,
             column_homogeneous=False,
             hexpand=True,
             vexpand=True
         )
-        self.main_grid.attach(top_area, 0, 0, 1, 1)
-        self.main_grid.attach(bottom_area, 0, 1, 1, 1)
+        self.main_view.attach(top_area, 0, 0, 1, 1)
+        self.main_view.attach(bottom_area, 0, 1, 1, 1)
         
-        self.overlay.add(self.main_grid)
-        self.overlay.show_all()
+        # Initial view
+        self.content.add(self.main_view)
+        self.content.show_all()
 
-    def _show_modal(self, content, style_class="vvd-modal-overlay"):
-        # Simple Box that fills the entire overlay area
-        modal_overlay = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        modal_overlay.get_style_context().add_class(style_class)
-        modal_overlay.set_hexpand(True)
-        modal_overlay.set_vexpand(True)
-        modal_overlay.set_halign(Gtk.Align.FILL)
-        modal_overlay.set_valign(Gtk.Align.FILL)
-        
-        # Center the content box within this filling container
-        content.set_valign(Gtk.Align.CENTER)
-        content.set_halign(Gtk.Align.CENTER)
-        
-        modal_overlay.add(content)
-        self.overlay.add_overlay(modal_overlay)
-        self.modal_overlay = modal_overlay
-        self.overlay.show_all()
-        return modal_overlay
-
-    def _close_modal(self, modal_widget):
-        self.overlay.remove(modal_widget)
-        self.modal_overlay = None
+    def _switch_view(self, new_view):
+        # Remove current children from self.content
+        for child in self.content.get_children():
+            self.content.remove(child)
+        # Add the new view
+        self.content.add(new_view)
+        self.content.show_all()
 
     # ---- Material Components ----
     def create_material_scroll(self):
@@ -453,122 +435,145 @@ class Panel(ScreenPanel):
             name = self._coalesce_detail_value(meta.get("name"), name)
             nozzle_temp = self._coalesce_detail_value(meta.get("nozzle_temp"), nozzle_temp)
             bed_temp = self._coalesce_detail_value(meta.get("bed_temp"), bed_temp)
-        else:
-            # Fallback to Moonraker lane_data
-            lane_data = self._get_lane_data()
-            if lane_data:
-                vendor = self._coalesce_detail_value(
-                    lane_data.get("vendor_name"), vendor)
-                name = self._coalesce_detail_value(
-                    lane_data.get("name"), name)
-                nozzle_temp = self._coalesce_detail_value(
-                    lane_data.get("nozzle_temp"), nozzle_temp)
-                bed_temp = self._coalesce_detail_value(
-                    lane_data.get("bed_temp"), bed_temp)
 
-        screen = self._screen.get_screen()
-        screen_width = screen.get_width()
-        screen_height = screen.get_height()
+        screen_width = get_screen_width(self)
         font_size = screen_width / 45
 
-        grid = Gtk.Grid(
-            row_spacing=10,
-            column_spacing=10,
-            margin=20,
-            hexpand=True,
-            vexpand=True,
-        )
-        
-        # Wrap grid in a box that will be passed to show_keyboard
+        # --- Details Overview View ---
+        details_view = Gtk.Grid(hexpand=True, vexpand=True)
+        details_view.get_style_context().add_class("vvd-details-view")
+
         content_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=10,
-            hexpand=False,
-            vexpand=False,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER,
         )
         content_box.get_style_context().add_class("vvd-modal-box")
         content_box.set_size_request(screen_width * 0.8, -1)
+        
+        grid = Gtk.Grid(row_spacing=15, column_spacing=20, margin=20)
         content_box.pack_start(grid, True, True, 20)
 
-        def show_keyboard(entry):
-            # Using self.content is the standard KlipperScreen way to shift the whole panel
-            self._screen.show_keyboard(entry=entry, box=self.content)
-            return False
-
-        def add_row(row, label_text, entry_text, input_purpose=None):
-            label = VLabel(content=label_text, size=font_size)
-            entry = Gtk.Entry()
-            entry.set_text(entry_text or "")
-            entry.set_hexpand(True)
-            if input_purpose is not None:
-                entry.set_input_purpose(input_purpose)
-            grid.attach(label, 0, row, 1, 1)
-            grid.attach(entry, 1, row, 1, 1)
-            entry.connect("focus-in-event", lambda w, e: show_keyboard(w))
-            entry.connect("button-press-event", lambda w, e: show_keyboard(w))
-            return entry
-
-        vendor_entry = add_row(
-            0, "Vendor", vendor, Gtk.InputPurpose.FREE_FORM)
-        name_entry = add_row(
-            1, "Name", name, Gtk.InputPurpose.FREE_FORM)
-        nozzle_entry = add_row(
-            2, "Nozzle Temp", nozzle_temp, Gtk.InputPurpose.NUMBER)
-        bed_entry = add_row(
-            3, "Bed Temp", bed_temp, Gtk.InputPurpose.NUMBER)
-
-        action_bar = Gtk.Grid(
-            row_homogeneous=True, column_homogeneous=True, margin_top=10
-        )
-        save_btn = HorButton(label=VLabel(content="Save", size=font_size, bold=True))
-        cancel_btn = HorButton(label=VLabel(content="Cancel", size=font_size, bold=True))
-        action_bar.attach(cancel_btn, 0, 0, 1, 1)
-        action_bar.attach(save_btn, 1, 0, 1, 1)
-        grid.attach(action_bar, 0, 4, 2, 1)
-
-        # Show modal at the end after all widgets are added to grid
-        modal_widget = self._show_modal(content_box)
-
-        def save_details():
-            vendor_val = vendor_entry.get_text().strip()
-            name_val = name_entry.get_text().strip()
-            nozzle_val = self._parse_optional_float(
-                nozzle_entry.get_text(), "nozzle_temp")
-            bed_val = self._parse_optional_float(
-                bed_entry.get_text(), "bed_temp")
-
-            if nozzle_val == "__invalid__" or bed_val == "__invalid__":
-                return
-
-            nozzle_text = "" if nozzle_val is None else str(nozzle_val)
-            bed_text = "" if bed_val is None else str(bed_val)
-            empty_str = "\"\""
-
-            self.cfg_manager.update_slot_details(
-                self.slot_num,
-                vendor_val,
-                name_val,
-                nozzle_text,
-                bed_text,
-            )
-
-            script = (
-                f"MMS_SLOT_MAP SLOT={self.slot_num}"
-                f" VENDOR={self._format_gcode_str(vendor_val)}"
-                f" NAME={self._format_gcode_str(name_val)}"
-                f" NOZZLE_TEMP={nozzle_text if nozzle_text else empty_str}"
-                f" BED_TEMP={bed_text if bed_text else empty_str}"
-            )
-            self._screen._ws.klippy.gcode_script(script)
+        def add_detail_row(row, label_text, value, field_key):
+            lbl = VLabel(content=f"<b>{label_text}:</b>", size=font_size)
+            val_lbl = VLabel(content=value if value else "-", size=font_size)
+            val_lbl.set_hexpand(True)
             
-            self._screen.remove_keyboard(box=self.content)
-            self._close_modal(modal_widget)
+            edit_btn = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+            edit_img = VImage("vivid_edit", size=font_size*1.2)
+            edit_btn.set_image(edit_img)
+            
+            grid.attach(lbl, 0, row, 1, 1)
+            grid.attach(val_lbl, 1, row, 1, 1)
+            grid.attach(edit_btn, 2, row, 1, 1)
+            
+            edit_btn.connect("clicked", lambda w: self.show_edit_view(
+                label_text, value, field_key))
 
-        cancel_btn.connect("clicked", lambda w: (
-            self._screen.remove_keyboard(box=self.content),
-            self._close_modal(modal_widget)
+        add_detail_row(0, "Vendor", vendor, "vendor")
+        add_detail_row(1, "Name", name, "name")
+        add_detail_row(2, "Nozzle Temp", nozzle_temp, "nozzle_temp")
+        add_detail_row(3, "Bed Temp", bed_temp, "bed_temp")
+
+        # Bottom Actions
+        action_bar = Gtk.Box(spacing=20, halign=Gtk.Align.CENTER, margin_bottom=15)
+        back_btn = HorButton(label=VLabel(content="Back", size=font_size, bold=True))
+        back_btn.connect("clicked", lambda w: self._switch_view(self.main_view))
+        action_bar.pack_start(back_btn, False, False, 0)
+        content_box.add(action_bar)
+
+        details_view.attach(content_box, 0, 0, 1, 1)
+        self._switch_view(details_view)
+
+    def show_edit_view(self, label_text, current_value, field_key):
+        screen_width = get_screen_width(self)
+        font_size = screen_width / 40
+
+        edit_view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20, margin=20)
+        
+        # Header with Title
+        header = VLabel(content=f"Edit {label_text}", size=font_size, bold=True)
+        edit_view.pack_start(header, False, False, 0)
+
+        # Large Input Field at Top
+        entry = Gtk.Entry()
+        entry.set_text(str(current_value) if current_value is not None else "")
+        entry.get_style_context().add_class("vvd-edit-entry")
+        entry.set_hexpand(True)
+        
+        if "temp" in field_key.lower():
+            entry.set_input_purpose(Gtk.InputPurpose.NUMBER)
+        
+        edit_view.pack_start(entry, False, False, 0)
+
+        # Action Buttons
+        btn_box = Gtk.Box(spacing=20, halign=Gtk.Align.CENTER)
+        cancel_btn = HorButton(label=VLabel(content="Cancel", size=font_size*0.8))
+        confirm_btn = HorButton(label=VLabel(content="Confirm", size=font_size*0.8))
+        
+        btn_box.pack_start(cancel_btn, False, False, 0)
+        btn_box.pack_start(confirm_btn, False, False, 0)
+        edit_view.pack_start(btn_box, False, False, 0)
+
+        self._switch_view(edit_view)
+        
+        # Auto-focus and show keyboard
+        from gi.repository import GLib
+        GLib.timeout_add(100, lambda: (
+            entry.grab_focus(),
+            self._screen.show_keyboard(entry=entry, box=self.content),
+            False
         ))
-        save_btn.connect("clicked", lambda w: save_details())
+
+        def on_confirm():
+            new_val = entry.get_text().strip()
+            self._save_single_detail(field_key, new_val)
+            self._screen.remove_keyboard(box=self.content)
+            # Refresh details overview
+            self.show_details_window()
+
+        def on_cancel():
+            self._screen.remove_keyboard(box=self.content)
+            self.show_details_window()
+
+        confirm_btn.connect("clicked", lambda w: on_confirm())
+        cancel_btn.connect("clicked", lambda w: on_cancel())
+        # Also handle Enter key
+        entry.connect("activate", lambda w: on_confirm())
+
+    def _save_single_detail(self, field_key, value):
+        vendor, name, nozzle_temp, bed_temp = self.cfg_manager.get_slot_details(
+            self.slot_num
+        )
+        
+        if field_key == "vendor": vendor = value
+        elif field_key == "name": name = value
+        elif field_key == "nozzle_temp": nozzle_temp = value
+        elif field_key == "bed_temp": bed_temp = value
+
+        # Validate temps
+        if "temp" in field_key:
+            f_val = self._parse_optional_float(value, field_key)
+            if f_val == "__invalid__":
+                return
+            value = "" if f_val is None else str(f_val)
+            if field_key == "nozzle_temp": nozzle_temp = value
+            else: bed_temp = value
+
+        self.cfg_manager.update_slot_details(
+            self.slot_num, vendor, name, nozzle_temp, bed_temp
+        )
+
+        empty_str = "\"\""
+        script = (
+            f"MMS_SLOT_MAP SLOT={self.slot_num}"
+            f" VENDOR={self._format_gcode_str(vendor)}"
+            f" NAME={self._format_gcode_str(name)}"
+            f" NOZZLE_TEMP={nozzle_temp if nozzle_temp else empty_str}"
+            f" BED_TEMP={bed_temp if bed_temp else empty_str}"
+        )
+        self._screen._ws.klippy.gcode_script(script)
 
     def mms_slot_action(self, script):
         """Execute GCode command for slot action"""
