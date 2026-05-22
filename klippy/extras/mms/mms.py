@@ -1252,9 +1252,30 @@ class MMS:
         )
         return vendor, name, material, color
 
-    def _format_slot_map(self, detail=False):
+    def _format_slot_map(self, detail=False, as_json=False):
         def fmt(value):
             return value if value not in (None, "") else "-"
+
+        if as_json:
+            data = {}
+            for mms_slot in sorted(self.mms_slots, key=lambda s: s.get_num()):
+                vendor, name, material, color = self._get_slot_map_fields(mms_slot)
+                filament_info = mms_slot.meta.filament_info or {}
+                slot_data = {
+                    "material": material,
+                    "color": color,
+                    "name": name,
+                    "vendor": vendor,
+                }
+                if detail:
+                    slot_data.update({
+                        "spool_id": mms_slot.meta.spool_id,
+                        "filament_id": filament_info.get("filament_id"),
+                        "bed_temp": filament_info.get("bed_temperature"),
+                        "nozzle_temp": filament_info.get("nozzle_temp"),
+                    })
+                data[str(mms_slot.get_num())] = slot_data
+            return json.dumps(data)
 
         lines = ["MMS Slot Map:"]
         for mms_slot in sorted(self.mms_slots, key=lambda s: s.get_num()):
@@ -1462,7 +1483,9 @@ class MMS:
 
         if not has_updates and not has_gate:
             if not quiet:
-                self.log_info(self._format_slot_map(detail=detail))
+                # Return JSON response for KlipperScreen if no args provided
+                response = self._format_slot_map(detail=detail, as_json=True)
+                gcmd.respond_info(response)
             return
 
         if not has_gate:

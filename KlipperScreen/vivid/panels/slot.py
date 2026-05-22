@@ -16,6 +16,7 @@ from vivid.components.image import VividImage as VImage
 from vivid.components.label import VividLabel as VLabel
 from vivid.components.utils import (
     apply_button_css,
+    create_popup_window,
     create_section_container,
     get_screen_width,
 )
