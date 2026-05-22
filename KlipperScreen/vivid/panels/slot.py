@@ -494,12 +494,10 @@ class Panel(ScreenPanel):
         content_box.set_size_request(screen_width * 0.8, -1)
         content_box.pack_start(grid, True, True, 20)
 
-        # Show modal first so it is in the widget hierarchy
-        modal_widget = self._show_modal(content_box)
-
         def show_keyboard(entry):
-            # Pass the modal_widget to show_keyboard so KlipperScreen can shift it
-            self._screen.show_keyboard(entry=entry, box=modal_widget)
+            # Use the modal overlay as the shift target
+            if hasattr(self, "modal_overlay") and self.modal_overlay:
+                self._screen.show_keyboard(entry=entry, box=self.modal_overlay)
             return False
 
         def add_row(row, label_text, entry_text, input_purpose=None):
@@ -533,6 +531,9 @@ class Panel(ScreenPanel):
         action_bar.attach(save_btn, 1, 0, 1, 1)
         grid.attach(action_bar, 0, 4, 2, 1)
 
+        # Show modal at the end after all widgets are added to grid
+        modal_widget = self._show_modal(content_box)
+
         def save_details():
             vendor_val = vendor_entry.get_text().strip()
             name_val = name_entry.get_text().strip()
@@ -565,11 +566,11 @@ class Panel(ScreenPanel):
             )
             self._screen._ws.klippy.gcode_script(script)
             
-            self._screen.remove_keyboard(box=content_box)
+            self._screen.remove_keyboard(box=self.modal_overlay)
             self._close_modal(modal_widget)
 
         cancel_btn.connect("clicked", lambda w: (
-            self._screen.remove_keyboard(box=content_box),
+            self._screen.remove_keyboard(box=self.modal_overlay),
             self._close_modal(modal_widget)
         ))
         save_btn.connect("clicked", lambda w: save_details())
