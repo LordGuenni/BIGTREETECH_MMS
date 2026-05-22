@@ -418,6 +418,7 @@ class Panel(ScreenPanel):
 
             nozzle_text = "" if nozzle_val is None else str(nozzle_val)
             bed_text = "" if bed_val is None else str(bed_val)
+            empty_str = "\"\""
 
             self.cfg_manager.update_slot_details(
                 self.slot_num,
@@ -431,8 +432,8 @@ class Panel(ScreenPanel):
                 f"MMS_SLOT_MAP SLOT={self.slot_num}"
                 f" VENDOR={self._format_gcode_str(vendor_val)}"
                 f" NAME={self._format_gcode_str(name_val)}"
-                f" NOZZLE_TEMP={nozzle_text if nozzle_text else '\"\"'}"
-                f" BED_TEMP={bed_text if bed_text else '\"\"'}"
+                f" NOZZLE_TEMP={nozzle_text if nozzle_text else empty_str}"
+                f" BED_TEMP={bed_text if bed_text else empty_str}"
             )
             self._screen._ws.klippy.gcode_script(script)
             close_window()
