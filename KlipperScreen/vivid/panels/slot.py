@@ -51,6 +51,10 @@ class Panel(ScreenPanel):
 
     def build_ui(self):
         """Build the main UI structure"""
+        # Main container with overlay for modals
+        self.overlay = Gtk.Overlay()
+        self.content.add(self.overlay)
+
         # Top area: Material scroll and Color palette
         top_area = create_section_container("vvd-slotpanel-area-top")
         top_area.attach(self.create_material_scroll(), 0, 0, 1, 1)
@@ -64,15 +68,34 @@ class Panel(ScreenPanel):
         bottom_area.attach(self.create_details_bar(), 0, 1, 1, 1)
 
         # Main grid layout
-        main_grid = Gtk.Grid(
+        self.main_grid = Gtk.Grid(
             row_homogeneous=False,
             column_homogeneous=False,
             hexpand=True,
             vexpand=True
         )
-        main_grid.attach(top_area, 0, 0, 1, 1)
-        main_grid.attach(bottom_area, 0, 1, 1, 1)
-        self.content.add(main_grid)
+        self.main_grid.attach(top_area, 0, 0, 1, 1)
+        self.main_grid.attach(bottom_area, 0, 1, 1, 1)
+        
+        self.overlay.add(self.main_grid)
+        self.overlay.show_all()
+
+    def _show_modal(self, content, style_class="vvd-modal-overlay"):
+        # Create a semi-transparent background
+        modal_overlay = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        modal_overlay.get_style_context().add_class(style_class)
+        
+        # Center the content
+        modal_overlay.set_valign(Gtk.Align.CENTER)
+        modal_overlay.set_halign(Gtk.Align.CENTER)
+        
+        modal_overlay.add(content)
+        self.overlay.add_overlay(modal_overlay)
+        self.overlay.show_all()
+        return modal_overlay
+
+    def _close_modal(self, modal_widget):
+        self.overlay.remove(modal_widget)
 
     # ---- Material Components ----
     def create_material_scroll(self):
@@ -454,9 +477,12 @@ class Panel(ScreenPanel):
         content_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=10,
-            hexpand=True,
-            vexpand=True,
+            hexpand=False,
+            vexpand=False,
+            margin=30,
         )
+        content_box.get_style_context().add_class("vvd-modal-box")
+        content_box.set_size_request(screen_width * 0.8, screen_height * 0.6)
         content_box.pack_start(grid, True, True, 0)
 
         def show_keyboard(entry):
@@ -494,11 +520,7 @@ class Panel(ScreenPanel):
         action_bar.attach(save_btn, 1, 0, 1, 1)
         grid.attach(action_bar, 0, 4, 2, 1)
 
-        close_popup = create_popup_window(
-            f"Slot {self.slot_num} Details", 
-            content_box, 
-            "vvd-slot-details-window"
-        )
+        modal_widget = self._show_modal(content_box)
 
         def save_details():
             vendor_val = vendor_entry.get_text().strip()
@@ -533,11 +555,11 @@ class Panel(ScreenPanel):
             self._screen._ws.klippy.gcode_script(script)
             
             self._screen.remove_keyboard(box=content_box)
-            close_popup()
+            self._close_modal(modal_widget)
 
         cancel_btn.connect("clicked", lambda w: (
             self._screen.remove_keyboard(box=content_box),
-            close_popup()
+            self._close_modal(modal_widget)
         ))
         save_btn.connect("clicked", lambda w: save_details())
 
