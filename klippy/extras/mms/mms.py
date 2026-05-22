@@ -941,7 +941,7 @@ class MMS:
             material = material.value
         spool_id = slot_meta.spool_id if slot_meta.spool_id and slot_meta.spool_id > 0 else None
 
-        is_empty = mms_slot.is_empty() and spool_id is None
+        is_empty = mms_slot.is_empty()
         if is_empty:
             return {
                 "vendor_name": None,
