@@ -1194,6 +1194,18 @@ class MMS:
         value = str(value).strip()
         return value if value else None
 
+    def _normalize_slot_map_number(self, value, field_name):
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            self.log_error(f"MMS_SLOT_MAP invalid {field_name}: '{value}'")
+            return "__invalid__"
+
     def _parse_slot_map_targets(self, gate, gates_param):
         gates = []
         if gate is not None:
@@ -1247,6 +1259,7 @@ class MMS:
         lines = ["MMS Slot Map:"]
         for mms_slot in sorted(self.mms_slots, key=lambda s: s.get_num()):
             vendor, name, material, color = self._get_slot_map_fields(mms_slot)
+            filament_info = mms_slot.meta.filament_info or {}
             line = (
                 f"Slot {mms_slot.get_num()}: "
                 f"material={fmt(material)} "
@@ -1255,13 +1268,16 @@ class MMS:
                 f"vendor={fmt(vendor)}"
             )
             if detail:
+                bed_temp = filament_info.get("bed_temperature")
+                nozzle_temp = filament_info.get("nozzle_temp")
                 filament_id = (
-                    mms_slot.meta.filament_info.get("filament_id") if
-                    mms_slot.meta.filament_info else None
+                    filament_info.get("filament_id") if filament_info else None
                 )
                 line += (
                     f" spool_id={fmt(mms_slot.meta.spool_id)}"
                     f" filament_id={fmt(filament_id)}"
+                    f" bed_temp={fmt(bed_temp)}"
+                    f" nozzle_temp={fmt(nozzle_temp)}"
                 )
             lines.append(line)
         return "\n".join(lines)
@@ -1277,6 +1293,10 @@ class MMS:
         material_set,
         color,
         color_set,
+        bed_temp,
+        bed_temp_set,
+        nozzle_temp,
+        nozzle_temp_set,
         reset,
     ):
         filament_info = dict(mms_slot.meta.filament_info or {})
@@ -1289,6 +1309,8 @@ class MMS:
                 "color_name_a",
                 "color_code",
                 "filament_material_type",
+                "bed_temperature",
+                "nozzle_temp",
             ):
                 if key in filament_info:
                     filament_info.pop(key, None)
@@ -1347,6 +1369,24 @@ class MMS:
                 filament_info["color_code"] = color
                 updated = True
 
+        if bed_temp_set:
+            if bed_temp is None:
+                if "bed_temperature" in filament_info:
+                    filament_info.pop("bed_temperature", None)
+                    updated = True
+            else:
+                filament_info["bed_temperature"] = bed_temp
+                updated = True
+
+        if nozzle_temp_set:
+            if nozzle_temp is None:
+                if "nozzle_temp" in filament_info:
+                    filament_info.pop("nozzle_temp", None)
+                    updated = True
+            else:
+                filament_info["nozzle_temp"] = nozzle_temp
+                updated = True
+
         if updated:
             mms_slot.set_filament_info(filament_info)
 
@@ -1372,16 +1412,28 @@ class MMS:
         name_raw = gcmd.get("NAME", default=None)
         material_raw = gcmd.get("MATERIAL", default=None)
         color_raw = gcmd.get("COLOR", default=None)
+        bed_temp_raw = gcmd.get("BED_TEMP", default=None)
+        nozzle_temp_raw = gcmd.get("NOZZLE_TEMP", default=None)
 
         vendor_set = vendor_raw is not None
         name_set = name_raw is not None
         material_set = material_raw is not None
         color_set = color_raw is not None
+        bed_temp_set = bed_temp_raw is not None
+        nozzle_temp_set = nozzle_temp_raw is not None
 
         vendor = self._normalize_slot_map_value(vendor_raw)
         name = self._normalize_slot_map_value(name_raw)
         material = self._normalize_slot_map_value(material_raw)
         color = self._normalize_slot_map_value(color_raw)
+        if color and color.startswith("#"):
+            color = color.lstrip("#")
+        bed_temp = self._normalize_slot_map_number(bed_temp_raw, "BED_TEMP")
+        nozzle_temp = self._normalize_slot_map_number(
+            nozzle_temp_raw, "NOZZLE_TEMP")
+
+        if bed_temp == "__invalid__" or nozzle_temp == "__invalid__":
+            return
 
         if slot is not None:
             if gate is not None and gate != slot:
@@ -1396,7 +1448,16 @@ class MMS:
                 gates_param = slots_param
 
         has_updates = any(
-            [vendor_set, name_set, material_set, color_set, reset])
+            [
+                vendor_set,
+                name_set,
+                material_set,
+                color_set,
+                bed_temp_set,
+                nozzle_temp_set,
+                reset,
+            ]
+        )
         has_gate = gate is not None or gates_param is not None
 
         if not has_updates and not has_gate:
@@ -1427,6 +1488,10 @@ class MMS:
                 material_set,
                 color,
                 color_set,
+                bed_temp,
+                bed_temp_set,
+                nozzle_temp,
+                nozzle_temp_set,
                 reset,
             )
             if updated:

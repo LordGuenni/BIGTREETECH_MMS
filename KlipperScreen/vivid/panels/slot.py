@@ -60,6 +60,7 @@ class Panel(ScreenPanel):
         slot_control = self.create_slot_control(self.slot_num, self.color)
         self.color_dependent_widgets.append(slot_control)
         bottom_area.attach(slot_control, 0, 0, 1, 1)
+        bottom_area.attach(self.create_details_bar(), 0, 1, 1, 1)
 
         # Main grid layout
         main_grid = Gtk.Grid(
@@ -164,7 +165,7 @@ class Panel(ScreenPanel):
         self.cfg_manager.update_slot_material(self.slot_num, material)
 
         # Sync to Klipper
-        script = f"MMS_SLOT_MATERIAL SLOT={self.slot_num} MATERIAL='{material}'"
+        script = f"MMS_SLOT_MAP SLOT={self.slot_num} MATERIAL='{material}'"
         self._screen._ws.klippy.gcode_script(script)
 
     # ---- Color Palette Components ----
@@ -229,7 +230,8 @@ class Panel(ScreenPanel):
 
         # Sync to Klipper
         color_hex = new_color[1:] if new_color.startswith("#") else new_color
-        script = f"MMS_SLOT_COLOR SLOT={self.slot_num} CODE='#{color_hex}'"
+        color_hex = color_hex.lower()
+        script = f"MMS_SLOT_MAP SLOT={self.slot_num} COLOR='{color_hex}'"
         self._screen._ws.klippy.gcode_script(script)
 
         # Update hardware LED color
@@ -239,6 +241,7 @@ class Panel(ScreenPanel):
         """Update hardware LED color (strip '#' prefix)"""
         # self.color = "#FFFFFF" --> COLOR=FFFFFF
         color_hex = color[1:] if color.startswith("#") else color
+        color_hex = color_hex.lower()
         script = f"MMS_LED_SET_COLOR SLOT={self.slot_num} COLOR={color_hex}"
         self._screen._ws.klippy.gcode_script(script)
 
@@ -307,6 +310,137 @@ class Panel(ScreenPanel):
         button.connect("clicked", lambda w: self.mms_slot_action(script))
 
         return button
+
+    def create_details_bar(self):
+        bar = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+        bar.attach(self.create_details_button(), 0, 0, 1, 1)
+        return bar
+
+    def create_details_button(self):
+        screen_width = get_screen_width(self)
+        font_size = screen_width / 60
+        button = HorButton(
+            label=VLabel(content="Details", size=font_size, bold=True)
+        )
+        base_class = "vvd-slot-details-btn"
+        apply_button_css(button, base_class, f"border-bottom-color: {self.color};")
+        apply_button_css(
+            button, f"{base_class}:active", f"background-color: {self.color};"
+        )
+        button.original_color = self.color
+        button.refresh_pattern = f"""
+        .{base_class} {{
+            border-bottom-color: %s;
+        }}
+        .{base_class}:active {{
+            background-color: %s;
+        }}
+        """
+        self.color_dependent_widgets.append(button)
+        button.connect("clicked", lambda w: self.show_details_window())
+        return button
+
+    def _format_gcode_str(self, value):
+        escaped = value.replace('"', '\\"')
+        return f"\"{escaped}\""
+
+    def _parse_optional_float(self, value, field_name):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            logging.error(f"Invalid {field_name} value: {value}")
+            return "__invalid__"
+
+    def show_details_window(self):
+        vendor, name, nozzle_temp, bed_temp = self.cfg_manager.get_slot_details(
+            self.slot_num
+        )
+
+        screen = self._screen.get_screen()
+        screen_width = screen.get_width()
+        screen_height = screen.get_height()
+        font_size = screen_width / 45
+
+        grid = Gtk.Grid(
+            row_spacing=10,
+            column_spacing=10,
+            margin=20,
+            hexpand=True,
+            vexpand=True,
+        )
+
+        def add_row(row, label_text, entry_text):
+            label = VLabel(content=label_text, size=font_size)
+            entry = Gtk.Entry()
+            entry.set_text(entry_text or "")
+            entry.set_hexpand(True)
+            grid.attach(label, 0, row, 1, 1)
+            grid.attach(entry, 1, row, 1, 1)
+            return entry
+
+        vendor_entry = add_row(0, "Vendor", vendor)
+        name_entry = add_row(1, "Name", name)
+        nozzle_entry = add_row(2, "Nozzle Temp", nozzle_temp)
+        bed_entry = add_row(3, "Bed Temp", bed_temp)
+
+        action_bar = Gtk.Grid(
+            row_homogeneous=True, column_homogeneous=True, margin_top=10
+        )
+        save_btn = HorButton(label=VLabel(content="Save", size=font_size, bold=True))
+        cancel_btn = HorButton(label=VLabel(content="Cancel", size=font_size, bold=True))
+        action_bar.attach(cancel_btn, 0, 0, 1, 1)
+        action_bar.attach(save_btn, 1, 0, 1, 1)
+        grid.attach(action_bar, 0, 4, 2, 1)
+
+        window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+        window.set_title(f"Slot {self.slot_num} Details")
+        window.set_position(Gtk.WindowPosition.CENTER)
+        window.set_default_size(screen_width / 1.5, screen_height / 1.5)
+        window.set_modal(True)
+        window.add(grid)
+
+        def close_window():
+            window.destroy()
+
+        def save_details():
+            vendor_val = vendor_entry.get_text().strip()
+            name_val = name_entry.get_text().strip()
+            nozzle_val = self._parse_optional_float(
+                nozzle_entry.get_text(), "nozzle_temp")
+            bed_val = self._parse_optional_float(
+                bed_entry.get_text(), "bed_temp")
+
+            if nozzle_val == "__invalid__" or bed_val == "__invalid__":
+                return
+
+            nozzle_text = "" if nozzle_val is None else str(nozzle_val)
+            bed_text = "" if bed_val is None else str(bed_val)
+
+            self.cfg_manager.update_slot_details(
+                self.slot_num,
+                vendor_val,
+                name_val,
+                nozzle_text,
+                bed_text,
+            )
+
+            script = (
+                f"MMS_SLOT_MAP SLOT={self.slot_num}"
+                f" VENDOR={self._format_gcode_str(vendor_val)}"
+                f" NAME={self._format_gcode_str(name_val)}"
+                f" NOZZLE_TEMP={nozzle_text if nozzle_text else '\"\"'}"
+                f" BED_TEMP={bed_text if bed_text else '\"\"'}"
+            )
+            self._screen._ws.klippy.gcode_script(script)
+            close_window()
+
+        cancel_btn.connect("clicked", lambda w: close_window())
+        save_btn.connect("clicked", lambda w: save_details())
+
+        window.show_all()
 
     def mms_slot_action(self, script):
         """Execute GCode command for slot action"""

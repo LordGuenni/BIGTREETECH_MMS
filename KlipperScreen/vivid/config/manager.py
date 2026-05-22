@@ -20,6 +20,10 @@ class VividConfigManager:
         self.section_prefix = "slot_"
         self.option_color = "display_color"
         self.option_material = "material"
+        self.option_vendor = "vendor"
+        self.option_name = "name"
+        self.option_nozzle_temp = "nozzle_temp"
+        self.option_bed_temp = "bed_temp"
 
         # Tracks unsaved changes
         self._dirty = False
@@ -37,6 +41,10 @@ class VividConfigManager:
         # key:slot_num, value:color/material
         self._slot_colors = {}
         self._slot_materials = {}
+        self._slot_vendors = {}
+        self._slot_names = {}
+        self._slot_nozzle_temps = {}
+        self._slot_bed_temps = {}
 
         # Ensure config file exists and load initial state
         self._ensure_config_exists()
@@ -63,6 +71,10 @@ class VividConfigManager:
             _config_cache[section] = {
                 self.option_color : slot.display_color,
                 self.option_material : slot.material,
+                self.option_vendor : "",
+                self.option_name : "",
+                self.option_nozzle_temp : "",
+                self.option_bed_temp : "",
             }
 
         return _config_cache
@@ -81,7 +93,7 @@ class VividConfigManager:
 
     def _load_configuration(self):
         """Load entire configuration into memory"""
-        self._config_cache = {}
+        self._config_cache = self._initalize_config_cache()
 
         if not os.path.exists(self._config_path):
             return
@@ -102,6 +114,14 @@ class VividConfigManager:
                         self._slot_colors[slot_num] = value
                     elif option == self.option_material:
                         self._slot_materials[slot_num] = value
+                    elif option == self.option_vendor:
+                        self._slot_vendors[slot_num] = value
+                    elif option == self.option_name:
+                        self._slot_names[slot_num] = value
+                    elif option == self.option_nozzle_temp:
+                        self._slot_nozzle_temps[slot_num] = value
+                    elif option == self.option_bed_temp:
+                        self._slot_bed_temps[slot_num] = value
 
     def _save_configuration(self):
         """Write configuration to disk if changes exist"""
@@ -141,6 +161,14 @@ class VividConfigManager:
         color = self._slot_colors.get(slot_num, "#FFFFFF")
         material = self._slot_materials.get(slot_num, "ABS")
         return color, material
+
+    def get_slot_details(self, slot_num):
+        """Load details for a specific slot from cache"""
+        vendor = self._slot_vendors.get(slot_num, "")
+        name = self._slot_names.get(slot_num, "")
+        nozzle_temp = self._slot_nozzle_temps.get(slot_num, "")
+        bed_temp = self._slot_bed_temps.get(slot_num, "")
+        return vendor, name, nozzle_temp, bed_temp
 
     # def get_slots_configuration(self, offset=None, size=None):
     #     """Load configuration for all slots from cache"""
@@ -199,6 +227,23 @@ class VividConfigManager:
             self._config_cache[section] = {}
 
         self._config_cache[section][self.option_material] = material
+        self._dirty = True
+
+    def update_slot_details(self, slot_num, vendor, name, nozzle_temp, bed_temp):
+        """Update vendor/name/temperature for a slot in internal state"""
+        self._slot_vendors[slot_num] = vendor
+        self._slot_names[slot_num] = name
+        self._slot_nozzle_temps[slot_num] = nozzle_temp
+        self._slot_bed_temps[slot_num] = bed_temp
+
+        section = self._format_section(slot_num)
+        if section not in self._config_cache:
+            self._config_cache[section] = {}
+
+        self._config_cache[section][self.option_vendor] = vendor
+        self._config_cache[section][self.option_name] = name
+        self._config_cache[section][self.option_nozzle_temp] = nozzle_temp
+        self._config_cache[section][self.option_bed_temp] = bed_temp
         self._dirty = True
 
         # Auto-save if needed
