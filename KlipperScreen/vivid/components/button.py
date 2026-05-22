@@ -593,7 +593,7 @@ class CircleButtonAnimeMosaic(BaseImageButton):
         # Initial configuration
         self.diameter = diameter
         self.border_width = border_width
-        self.border_color = border_color
+        self._border_color = border_color
         self._border_mosaic = (border_color == "mosaic")
         # Angle in degrees
         self._glow_angle = 0

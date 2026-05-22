@@ -162,6 +162,14 @@ class VividConfigManager:
         material = self._slot_materials.get(slot_num, "ABS")
         return color, material
 
+    def get_slot_color(self, slot_num):
+        """Load color for a specific slot from cache"""
+        return self._slot_colors.get(slot_num, "#FFFFFF")
+
+    def get_slot_material(self, slot_num):
+        """Load material for a specific slot from cache"""
+        return self._slot_materials.get(slot_num, "ABS")
+
     def get_slot_details(self, slot_num):
         """Load details for a specific slot from cache"""
         vendor = self._slot_vendors.get(slot_num, "")

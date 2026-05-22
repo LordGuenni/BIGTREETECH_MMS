@@ -276,7 +276,11 @@ class MMSSlot:
         return self.slot_config.selector_calibrate_distance
 
     def get_status(self, eventtime=None):
-        return self.meta.report() if self._is_ready else {}
+        if not self._is_ready:
+            return {}
+        status = self.meta.report()
+        status["is_empty"] = self.is_empty()
+        return status
 
     # ---- RFID support ----
     # def rfid_is_enabled(self):

@@ -64,6 +64,8 @@ class Panel(ScreenPanel):
             self.play_slot_button)
         self.mms_controller.register_slot_delivery_pause_callback(
             self.pause_slot_button)
+        self.mms_controller.register_slot_empty_callback(
+            self.update_slot_empty)
         self.mms_controller.register_heater_temp_callback(
             self.set_current_temp)
 
@@ -229,17 +231,18 @@ class Panel(ScreenPanel):
         font_size_material = border_width
 
         # Create animated circle button
-        circle = CircleButtonAnime(
+        # circle = CircleButtonAnime(
+        #     diameter=diameter,
+        #     border_width=border_width,
+        #     border_color=color,
+        #     label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
+        # )
+        circle = CircleButtonAnimeMosaic(
             diameter=diameter,
             border_width=border_width,
             border_color=color,
             label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
         )
-        # circle = CircleButtonAnimeMosaic(
-        #     diameter=diameter,
-        #     border_width=border_width,
-        #     label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
-        # )
 
         # Create bottom label
         bottom_label = VLabel(content=material, size=font_size_material, bold=True)
@@ -276,6 +279,7 @@ class Panel(ScreenPanel):
             "button" : button,
             "circle" : circle,
             "bottom_label" : bottom_label,
+            "is_empty": False
         }
         return button
 
@@ -287,10 +291,16 @@ class Panel(ScreenPanel):
     def apply_slot_button_color(self, button, color):
         base_class = "vvd-slot-button"
         # Apply dynamic CSS
-        apply_button_css(
-            button, base_class, f"border-bottom-color: {color};")
-        apply_button_css(
-            button, f"{base_class}:active", f"background-color: {color};")
+        if color == "mosaic":
+            apply_button_css(
+                button, base_class, "border-bottom-color: #808080;")
+            apply_button_css(
+                button, f"{base_class}:active", "background-color: #808080;")
+        else:
+            apply_button_css(
+                button, base_class, f"border-bottom-color: {color};")
+            apply_button_css(
+                button, f"{base_class}:active", f"background-color: {color};")
 
     def show_slot_panel(self, slot_num, color, material):
         self._screen.show_panel(
@@ -315,6 +325,31 @@ class Panel(ScreenPanel):
 
         if label:
             slot_button["bottom_label"].set_content(label)
+
+    def update_slot_empty(self, slot_num, is_empty):
+        slot_button_dct = self.slot_buttons.get(slot_num)
+        if not slot_button_dct:
+            return
+
+        if slot_button_dct["is_empty"] == is_empty:
+            return
+
+        slot_button_dct["is_empty"] = is_empty
+
+        if is_empty:
+            # Change label to "Empty"
+            slot_button_dct["bottom_label"].set_content("Empty")
+            # Change circle to mosaic
+            slot_button_dct["circle"].set_border_color("mosaic")
+            self.apply_slot_button_color(slot_button_dct["button"], "mosaic")
+        else:
+            # Restore material name
+            material = self.cfg_manager.get_slot_material(slot_num)
+            slot_button_dct["bottom_label"].set_content(material)
+            # Restore color
+            color = self.cfg_manager.get_slot_color(slot_num)
+            slot_button_dct["circle"].set_border_color(color)
+            self.apply_slot_button_color(slot_button_dct["button"], color)
 
     # ---- Heat Functions ----
     def heat_with_temp(self, temperature, heat_duration, color):
