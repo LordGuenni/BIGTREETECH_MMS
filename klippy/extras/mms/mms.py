@@ -254,15 +254,35 @@ class MMS:
         self._is_connected = True
 
     def _handle_klippy_ready(self):
+        self._sync_retry_count = 0
         reactor = printer_adapter.get_reactor()
         reactor.register_timer(
-            callback=self._delayed_moonraker_sync,
+            callback=self._persistent_moonraker_sync,
             waketime=reactor.monotonic() + 1.0
         )
 
-    def _delayed_moonraker_sync(self, eventtime):
-        self._moonraker_pull_lane_data()
-        self._moonraker_sync_lane_data()
+    def _persistent_moonraker_sync(self, eventtime):
+        self._sync_retry_count += 1
+        
+        # Try to pull data
+        success = False
+        try:
+            if self._is_connected:
+                webhooks = printer_adapter.get_obj("webhooks")
+                webhooks.call_remote_method("moonraker_pull_lane_data")
+                success = True
+        except Exception:
+            success = False
+
+        if success:
+            self.log_info(f"Moonraker lane_data sync successful on attempt {self._sync_retry_count}")
+            self._moonraker_sync_lane_data()
+            return printer_adapter.get_reactor().NEVER
+        
+        if self._sync_retry_count < 5:
+            return eventtime + 2.0
+        
+        self.log_warning("Moonraker lane_data sync failed after 5 attempts")
         return printer_adapter.get_reactor().NEVER
 
     def _handle_klippy_shutdown(self):
