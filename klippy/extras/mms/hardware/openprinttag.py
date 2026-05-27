@@ -89,20 +89,20 @@ class CBORDecoder:
         return 0
 
 class OPTDecoder:
-    # Material Type ID mapping from OpenPrintTag spec v1
+    # Material Type ID mapping from official OpenPrintTag spec v1
     MATERIAL_TYPES = {
-        0: "GENERIC",
-        1: "PLA",
-        2: "PETG",
-        3: "ABS",
-        4: "ASA",
-        5: "PA",
-        6: "PC",
+        0: "PLA",
+        1: "PETG",
+        2: "ABS",
+        3: "ASA",
+        4: "PC",
+        5: "PP",
+        6: "PA",
         7: "TPU",
-        8: "PVA",
-        9: "HIPS",
-        10: "PP",
-        11: "FLEX",
+        8: "HIPS",
+        9: "PVA",
+        10: "BVOH",
+        11: "PVB",
         12: "PET",
     }
 
@@ -113,7 +113,7 @@ class OPTDecoder:
         # Find NDEF Message TLV (03)
         pos = 0
         while pos < len(data):
-            if data[pos] == 0x03: # NDEF Tag
+            if data[pos] == 0x03:
                 pos += 1
                 length = data[pos]
                 if length == 0xFF:
@@ -126,7 +126,6 @@ class OPTDecoder:
         else:
             return None
 
-        # Parse NDEF record (MIME type support)
         if pos >= len(data): return None
         header = data[pos]
         pos += 1
@@ -172,45 +171,43 @@ class OPTDecoder:
         if not isinstance(opt_data, dict) or not opt_data:
             return None
             
-        # 1. Name (Key 10)
-        name = str(opt_data.get(10) or opt_data.get("name", "Unknown"))
+        # Strict mapping according to OpenPrintTag v1 Spec
+        # 11: brand_name, 10: material_name, 9: material_type (enum)
         
-        # 2. Vendor (Key 11)
-        vendor = str(opt_data.get(11) or opt_data.get("vendor", "Generic"))
+        vendor = opt_data.get(11)
+        name = opt_data.get(10)
         
-        # 3. Material (Key 9)
         mat_id = opt_data.get(9)
-        material = self.MATERIAL_TYPES.get(mat_id)
+        material = self.MATERIAL_TYPES.get(mat_id, "GENERIC")
         
-        # Heuristic Backup: If ID is missing or 0, check name for keywords
-        if not material or material == "GENERIC":
-            name_u = name.upper()
-            if "PETG" in name_u: material = "PETG"
-            elif "PLA" in name_u: material = "PLA"
-            elif "ABS" in name_u: material = "ABS"
-            elif "ASA" in name_u: material = "ASA"
-            elif "TPU" in name_u: material = "TPU"
-            else: material = material or "PETG"
-        
-        # 4. Color (Key 64)
-        color = "607D8B"
-        color_map = opt_data.get(64)
-        if isinstance(color_map, dict):
-            if color_map.get(0) == 0: # sRGB
+        # Color (Key 19 - color_rgba)
+        color = None
+        c19 = opt_data.get(19)
+        if isinstance(c19, (bytes, bytearray)) and len(c19) >= 3:
+            color = c19[:3].hex().upper()
+        elif isinstance(c19, list) and len(c19) >= 3:
+            color = "".join([f"{c:02X}" for c in c19[:3]])
+            
+        # Fallback to Key 64 (color map)
+        if not color:
+            color_map = opt_data.get(64)
+            if isinstance(color_map, dict) and color_map.get(0) == 0:
                 val = color_map.get(1)
                 if isinstance(val, (bytes, bytearray)) and len(val) >= 3:
                     color = val[:3].hex().upper()
-                elif isinstance(val, list) and len(val) >= 3:
-                    color = "".join([f"{c:02X}" for c in val[:3]])
         
+        if not color:
+            color = "607D8B"
+        
+        # Final result using MMS internal keys
         res = {
-            "vendor_name": vendor,
-            "name": name,
+            "filament_manufacturer": vendor,
+            "filament_type_detailed": name,
             "filament_material_type": material,
             "color_code": color,
         }
         
-        # Temps (37=bed, 34=nozzle)
+        # Temps (37: min_bed, 34: min_print)
         try:
             bt = opt_data.get(37)
             if bt is not None: res["bed_temperature"] = float(bt[0]) if isinstance(bt, list) else float(bt)
