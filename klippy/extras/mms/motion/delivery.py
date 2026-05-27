@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import time
+import traceback
 from contextlib import nullcontext
 from dataclasses import dataclass, field, fields
 

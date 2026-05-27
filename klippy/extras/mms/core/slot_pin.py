@@ -235,7 +235,11 @@ class BaseSlotPin(ABC):
         reactor.pause(reactor.monotonic() + SlotPinConfig.break_delay)
 
         # Teardown dispatch
-        mcu_dispatch.stop()
+        try:
+            mcu_dispatch.stop()
+        except Exception:
+            # This can fail in mcu.py during race conditions, ignore it
+            pass
 
         return True
 
