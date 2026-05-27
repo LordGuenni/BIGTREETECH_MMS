@@ -679,7 +679,6 @@ class MmsServer:
         '''
         Pulls lane data from Moonraker database and pushes it to Klipper via G-code
         '''
-        logging.info("MMS server: pull_lane_data called (v3)")
         try:
             db = self.server.lookup_component("database", None)
             if db is None:
@@ -707,6 +706,13 @@ class MmsServer:
                                 "lane": str(gate),
                             }
 
+            # Always reset all slots in Klipper first to ensure empty states are synced
+            await self._initialize_mms()
+            if self.nb_gates:
+                logging.info(f"MMS server: resetting {self.nb_gates} slots in Klipper")
+                reset_cmd = f"MMS_SLOT_MAP GATES={','.join(map(str, range(self.nb_gates)))} RESET=1 QUIET=1"
+                await self.klippy_apis.run_gcode(reset_cmd)
+
             if lane_items:
                 logging.info(f"MMS server: pushing {len(lane_items)} lanes to Klipper")
                 for lane_key, data in lane_items.items():
@@ -728,13 +734,11 @@ class MmsServer:
                     if nt and float(nt) > 0: parts.append(f"NOZZLE_TEMP={nt}")
                     
                     cmd = " ".join(parts)
-                    logging.info(f"MMS server: executing {cmd}")
                     await self.klippy_apis.run_gcode(cmd)
 
             return lane_items or {}
         except Exception as e:
             logging.error(f"MMS server: Error in pull_lane_data: {e}")
-            logging.error(traceback.format_exc())
             return {"error": str(e)}
 
     async def cleanup_lane_data(self, num_gates):
