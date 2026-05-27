@@ -64,6 +64,8 @@ class Panel(ScreenPanel):
             self.play_slot_button)
         self.mms_controller.register_slot_delivery_pause_callback(
             self.pause_slot_button)
+        self.mms_controller.register_slot_empty_callback(
+            self.update_slot_empty)
         self.mms_controller.register_heater_temp_callback(
             self.set_current_temp)
 
@@ -229,17 +231,18 @@ class Panel(ScreenPanel):
         font_size_material = border_width
 
         # Create animated circle button
-        circle = CircleButtonAnime(
+        # circle = CircleButtonAnime(
+        #     diameter=diameter,
+        #     border_width=border_width,
+        #     border_color=color,
+        #     label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
+        # )
+        circle = CircleButtonAnimeMosaic(
             diameter=diameter,
             border_width=border_width,
             border_color=color,
             label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
         )
-        # circle = CircleButtonAnimeMosaic(
-        #     diameter=diameter,
-        #     border_width=border_width,
-        #     label=VLabel(content=f"{slot_num}", size=font_size_num, bold=True)
-        # )
 
         # Create bottom label
         bottom_label = VLabel(content=material, size=font_size_material, bold=True)
@@ -276,6 +279,7 @@ class Panel(ScreenPanel):
             "button" : button,
             "circle" : circle,
             "bottom_label" : bottom_label,
+            "is_empty": False
         }
         return button
 
@@ -287,10 +291,16 @@ class Panel(ScreenPanel):
     def apply_slot_button_color(self, button, color):
         base_class = "vvd-slot-button"
         # Apply dynamic CSS
-        apply_button_css(
-            button, base_class, f"border-bottom-color: {color};")
-        apply_button_css(
-            button, f"{base_class}:active", f"background-color: {color};")
+        if color == "mosaic":
+            apply_button_css(
+                button, base_class, "border-bottom-color: #808080;")
+            apply_button_css(
+                button, f"{base_class}:active", "background-color: #808080;")
+        else:
+            apply_button_css(
+                button, base_class, f"border-bottom-color: {color};")
+            apply_button_css(
+                button, f"{base_class}:active", f"background-color: {color};")
 
     def show_slot_panel(self, slot_num, color, material):
         self._screen.show_panel(
@@ -315,6 +325,31 @@ class Panel(ScreenPanel):
 
         if label:
             slot_button["bottom_label"].set_content(label)
+
+    def update_slot_empty(self, slot_num, is_empty):
+        slot_button_dct = self.slot_buttons.get(slot_num)
+        if not slot_button_dct:
+            return
+
+        if slot_button_dct["is_empty"] == is_empty:
+            return
+
+        slot_button_dct["is_empty"] = is_empty
+
+        if is_empty:
+            # Change label to "Empty"
+            slot_button_dct["bottom_label"].set_content("Empty")
+            # Change circle to mosaic
+            slot_button_dct["circle"].set_border_color("mosaic")
+            self.apply_slot_button_color(slot_button_dct["button"], "mosaic")
+        else:
+            # Restore material name
+            material = self.cfg_manager.get_slot_material(slot_num)
+            slot_button_dct["bottom_label"].set_content(material)
+            # Restore color
+            color = self.cfg_manager.get_slot_color(slot_num)
+            slot_button_dct["circle"].set_border_color(color)
+            self.apply_slot_button_color(slot_button_dct["button"], color)
 
     # ---- Heat Functions ----
     def heat_with_temp(self, temperature, heat_duration, color):
@@ -520,8 +555,10 @@ class Panel(ScreenPanel):
 
     # ---- Panel life ----
     def activate(self):
-        selecting_slot_num = []
+        # Sync with Klipper state
+        self.sync_with_klipper()
 
+        selecting_slot_num = []
         mms_selectors = self.mms_controller.get_mms_selectors()
         for index,status_dct in mms_selectors.items():
             # Focusing slot is not None
@@ -538,6 +575,46 @@ class Panel(ScreenPanel):
         # Play select animation
         for slot_num in set(selecting_slot_num):
             self.select_slot_button(slot_num)
+
+    def sync_with_klipper(self):
+        """Synchronize local configuration with Klipper's MMS state"""
+        slots_data = self.mms_controller.get_mms_slots()
+        if not slots_data:
+            return
+
+        for slot_num_str, slot_data in slots_data.items():
+            slot_num = int(slot_num_str)
+            
+            # Sync Color
+            color = slot_data.get("filament_color")
+            if color:
+                if not color.startswith("#"):
+                    color = f"#{color}"
+                self.cfg_manager.update_slot_color(slot_num, color)
+            
+            # Sync Material
+            material = slot_data.get("filament_material")
+            if material:
+                self.cfg_manager.update_slot_material(slot_num, material)
+            
+            # Sync Details
+            info = slot_data.get("filament_info", {})
+            vendor = info.get("filament_manufacturer", "")
+            name = info.get("filament_type_detailed") or info.get("color_name_a") or ""
+            nozzle_temp = info.get("nozzle_temp", "")
+            bed_temp = info.get("bed_temperature", "")
+            
+            self.cfg_manager.update_slot_details(
+                slot_num, vendor, name, nozzle_temp, bed_temp
+            )
+            
+            # Update UI button state
+            is_empty = slot_data.get("is_empty", False)
+            self.update_slot_empty(slot_num, is_empty)
+            
+            # If not empty, force refresh to show correctly synced values
+            if not is_empty and color and material:
+                self.refresh_slot_button(slot_num, color, material)
 
     def deactivate(self):
         for slot_num in self.slot_buttons:

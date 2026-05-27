@@ -110,6 +110,7 @@ class MMSSlot:
         self._can_update_deliver_distance = False
 
         self._is_ready = False
+        self._last_empty_state = None
 
         # Initialize Pins
         self._initialize_pins()
@@ -187,6 +188,7 @@ class MMSSlot:
         # Register led effect deactivate callback
         printer_adapter.register_mms_stepper_running(
             handler=self._handle_mms_stepper_running)
+        self._last_empty_state = self.is_empty()
         self._is_ready = True
 
     def _initialize_loggers(self):
@@ -276,7 +278,11 @@ class MMSSlot:
         return self.slot_config.selector_calibrate_distance
 
     def get_status(self, eventtime=None):
-        return self.meta.report() if self._is_ready else {}
+        if not self._is_ready:
+            return {}
+        status = self.meta.report()
+        status["is_empty"] = self.is_empty()
+        return status
 
     # ---- RFID support ----
     # def rfid_is_enabled(self):
@@ -507,6 +513,25 @@ class MMSSlot:
         if self.entry.is_set():
             lst.append(self.entry.is_released())
         return all(lst)
+
+    def update_lane_data_empty_state(self):
+        is_empty = self.is_empty()
+        if self._last_empty_state is None:
+            self._last_empty_state = is_empty
+            return
+        if is_empty and not self._last_empty_state:
+            self._last_empty_state = True
+            # Physically empty, so clear internal filament info
+            self.set_filament_color(None)
+            self.set_filament_material(None)
+            self.set_spool_id(None)
+            self.set_filament_info({})
+            
+            mms = printer_adapter.get_mms()
+            if mms:
+                mms.notify_lane_data_changed([self.num])
+        elif not is_empty and self._last_empty_state:
+            self._last_empty_state = False
 
     def is_new_insert(self):
         return self.inlet.is_new_triggered()

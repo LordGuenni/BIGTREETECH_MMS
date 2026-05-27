@@ -45,6 +45,8 @@ extras_dst_dir="${KLIPPER_HOME}/${EXTRAS_DIR}"
 neopixel="$extras_dst_dir/neopixel.py"
 aht30="$extras_dst_dir/aht10.py"
 
+MOONRAKER_HOME="${HOME}/moonraker"
+MOONRAKER_COMPONENTS_DIR="${MOONRAKER_HOME}/moonraker/components"
 KS_DIR="KlipperScreen"
 VIVID_DIR="${KS_DIR}/vivid"
 ks_dir="${HOME}/${KS_DIR}"
@@ -491,6 +493,50 @@ include_exclude_config_files() {
     fi
 }
 
+install_moonraker() {
+    log_echo "${TITLE}${SECTION}"
+    log_echo "${INFO}Installing ViViD Moonraker component..."
+    if [ -d "${MOONRAKER_COMPONENTS_DIR}" ]; then
+        local src_file="${SHELL_DIR}/moonraker/components/mms_server.py"
+        local dst_file="${MOONRAKER_COMPONENTS_DIR}/mms_server.py"
+        ln -sf "${src_file}" "${dst_file}"
+        log_echo "${INFO}ViViD Moonraker component linked to ${PURPLE}${dst_file}${INFO}!"
+        
+        # Auto-configure moonraker.conf
+        local moonraker_cfg="${KLIPPER_CONFIG_HOME}/moonraker.conf"
+        if [ -f "${moonraker_cfg}" ]; then
+            if ! grep -q "\[mms_server\]" "${moonraker_cfg}"; then
+                echo -e "\n[mms_server]\nenable_file_preprocessor: True\nenable_toolchange_next_pos: True" >> "${moonraker_cfg}"
+                log_echo "${INFO}Added ${PURPLE}[mms_server]${INFO} to ${PURPLE}${moonraker_cfg}"
+            else
+                log_echo "${INFO}${PURPLE}[mms_server]${INFO} already exists in ${PURPLE}${moonraker_cfg}"
+            fi
+        else
+            log_echo "${WARNING}Moonraker config file ${PURPLE}${moonraker_cfg}${WARNING} not found! Please add [mms_server] manually."
+        fi
+    else
+        log_echo "${WARNING}Moonraker components directory not found at ${PURPLE}${MOONRAKER_COMPONENTS_DIR}${WARNING}. Skipping Moonraker component installation."
+    fi
+}
+
+uninstall_moonraker() {
+    log_echo "${TITLE}${SECTION}"
+    log_echo "${INFO}Unlinking ViViD Moonraker component..."
+    local dst_file="${MOONRAKER_COMPONENTS_DIR}/mms_server.py"
+    if [ -L "${dst_file}" ]; then
+        rm -f "${dst_file}"
+        log_echo "${PURPLE}${dst_file}${INFO} removed!"
+    fi
+
+    # Remove configuration from moonraker.conf
+    local moonraker_cfg="${KLIPPER_CONFIG_HOME}/moonraker.conf"
+    if [ -f "${moonraker_cfg}" ]; then
+        # Remove [mms_server] and the two following lines
+        sed -i '/\[mms_server\]/,+2d' "${moonraker_cfg}"
+        log_echo "${INFO}Removed ${PURPLE}[mms_server]${INFO} from ${PURPLE}${moonraker_cfg}"
+    fi
+}
+
 unpatch_KlipperScreen() {
     # unpatch screen.py
     if [[ -f "${screen}" ]]; then
@@ -714,6 +760,7 @@ install_vivid() {
     log_disable
     cleaup_old_resource
     uninstall_klippy
+    uninstall_moonraker
     include_exclude_config_files 0
     uninstall_KlipperScreen
     log_enable
@@ -724,6 +771,7 @@ install_vivid() {
     set_purge_brush
 
     install_klippy
+    install_moonraker
 
     log_echo "${TITLE}${SECTION}"
     # vivid config files
@@ -732,6 +780,7 @@ install_vivid() {
     # include in printer.cfg
     include_exclude_config_files 1
     prompt_service_restart klipper installed
+    prompt_service_restart moonraker installed
 
     set_klipper_screen
     if [ "${g_klippe_screen}" -eq 1 ]; then
@@ -763,11 +812,13 @@ update_vivid() {
     log_disable
     cleaup_old_resource
     uninstall_klippy
+    uninstall_moonraker
     uninstall_KlipperScreen
     log_enable
 
     # reinstall klipper
     install_klippy
+    install_moonraker
     log_echo "${TITLE}${SECTION}"
     copy_config_files
     sync_config_opt_enable "{}"
@@ -778,6 +829,7 @@ update_vivid() {
     fi
 
     prompt_service_restart klipper updated
+    prompt_service_restart moonraker updated
     if [ "${g_klippe_screen}" -eq 1 ]; then
         prompt_service_restart KlipperScreen updated
     fi
@@ -792,8 +844,10 @@ uninstall_vivid() {
     cleaup_old_resource
 
     uninstall_klippy
+    uninstall_moonraker
     include_exclude_config_files 0
     prompt_service_restart klipper uninstalled
+    prompt_service_restart moonraker uninstalled
 
     uninstall_KlipperScreen
     prompt_service_restart KlipperScreen uninstalled

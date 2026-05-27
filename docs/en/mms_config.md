@@ -86,6 +86,19 @@ Controls the logging behavior of the MMS. By default, it follows Klipper's stand
 
 Includes all ViViD macro command definitions.
 
+#### MMS Slot Map (MMS_SLOT_MAP)
+
+Set or display filament metadata per slot for Moonraker lane data. SLOT/SLOTS are the preferred parameters (GATE/GATES are supported for compatibility). Optional temperature fields include NOZZLE_TEMP and BED_TEMP.
+
+**Examples:**
+```
+MMS_SLOT_MAP
+MMS_SLOT_MAP SLOT=0 MATERIAL='PETG' COLOR='FF0000' NAME='PETG HF Black Red' VENDOR='Bambu'
+MMS_SLOT_MAP SLOTS=0,1,2,3 MATERIAL='PETG'
+MMS_SLOT_MAP SLOT=0 NOZZLE_TEMP=240 BED_TEMP=80
+MMS_SLOT_MAP RESET=1
+```
+
 ### base/mms-cut.cfg
 
 #### [mms cut]
