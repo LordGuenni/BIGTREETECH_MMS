@@ -103,6 +103,7 @@ class SlotRFID:
             )
             return
 
+        self.log_info(f"slot[{self.slot_num}] RFID automatic detection started")
         self._is_detecting = True
         self.detect_begin_at = time.time()
         self.mms_rfid.set_duration(self.detect_duration)
