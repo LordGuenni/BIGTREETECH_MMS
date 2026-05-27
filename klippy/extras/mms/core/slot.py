@@ -521,6 +521,12 @@ class MMSSlot:
             return
         if is_empty and not self._last_empty_state:
             self._last_empty_state = True
+            # Physically empty, so clear internal filament info
+            self.set_filament_color(None)
+            self.set_filament_material(None)
+            self.set_spool_id(None)
+            self.set_filament_info({})
+            
             mms = printer_adapter.get_mms()
             if mms:
                 mms.notify_lane_data_changed([self.num])
