@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import time
+import traceback
 from contextlib import nullcontext
 from dataclasses import dataclass, field, fields
 
@@ -1756,6 +1757,7 @@ class MMSDelivery:
             #     self.async_task_sp.stop()
         except Exception as e:
             self.log_error(f"slot[{msg_slot}] stop error: {e}")
+            self.log_error(traceback.format_exc())
             return False
 
         self.log_info_s(f"slot[{msg_slot}] stop finish")

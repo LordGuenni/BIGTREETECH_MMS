@@ -6,6 +6,7 @@
 
 import json
 import time
+import traceback
 from contextlib import contextmanager
 
 from ..adapters import printer_adapter
@@ -142,8 +143,8 @@ class SlotRFID:
             # Make stop robust: even if it fails, try to start reading
             try:
                 self.mms_delivery.mms_stop(self.slot_num)
-            except Exception as e:
-                self.log_info_s(f"slot[{self.slot_num}] mms_stop error (ignored): {e}")
+            except Exception:
+                self.log_info_s(f"slot[{self.slot_num}] mms_stop error (ignored): {traceback.format_exc()}")
             
             # Start read phase regardless
             self.rfid_read_begin()
