@@ -240,19 +240,38 @@ class SlotRFID:
     def _handle_read(self, data):
         if data:
             self.rfid_read_end()
-            self.log_info(
-                f"slot[{self.slot_num}] RFID read data:\n"
-                f"{data}"
-            )
-
             try:
-                self.tag_data = json.loads(data)
-                self.tag_color = self.tag_data.get("color_code")
-                self._apply_tag_data()
+                tag_dict = json.loads(data)
+                # 1. Standard BTT Tag (JSON contains filament details directly)
+                if "filament_material_type" in tag_dict:
+                    self.log_info(f"slot[{self.slot_num}] BTT tag detected")
+                    self.tag_data = tag_dict
+                    self.tag_color = self.tag_data.get("color_code")
+                    self._apply_tag_data()
+                
+                # 2. Universal Read Fallback (contains raw ntag data)
+                elif tag_dict.get("_type") == "ntag_raw":
+                    raw_hex = tag_dict.get("data", "")
+                    self.log_info(f"slot[{self.slot_num}] NTAG chip detected, trying OpenPrintTag decoder...")
+                    raw_data = bytes.fromhex(raw_hex)
+                    
+                    decoder = OPTDecoder()
+                    opt_data = decoder.decode(raw_data)
+                    if opt_data:
+                        self.log_info(f"slot[{self.slot_num}] OpenPrintTag decoded: {opt_data}")
+                        mapped = decoder.map_to_mms(opt_data)
+                        if mapped:
+                            self.tag_data = mapped
+                            self.tag_color = mapped.get("color_code")
+                            self._apply_tag_data()
+                    else:
+                        self.log_error(f"slot[{self.slot_num}] Could not decode OpenPrintTag payload")
+                
+                else:
+                    self.log_warning(f"slot[{self.slot_num}] Unknown tag data format: {data[:100]}...")
+
             except Exception as e:
-                # If JSON fails, it might be an OpenPrintTag (binary)
-                self.log_info(f"slot[{self.slot_num}] JSON decode failed, trying OpenPrintTag...")
-                self._try_openprinttag_read()
+                self.log_error(f"slot[{self.slot_num}] RFID processing error: {e}")
 
         elif time.time()-self.read_begin_at > self.read_duration:
             self.rfid_read_end()

@@ -89,6 +89,22 @@ class CBORDecoder:
         return 0
 
 class OPTDecoder:
+    # Material Type ID mapping from OpenPrintTag spec
+    MATERIAL_TYPES = {
+        1: "PLA",
+        2: "PETG",
+        3: "ABS",
+        4: "ASA",
+        5: "PA",
+        6: "PC",
+        7: "TPU",
+        8: "PVA",
+        9: "HIPS",
+        10: "PP",
+        11: "FLEX",
+        12: "PET",
+    }
+
     def __init__(self):
         pass
 
@@ -146,21 +162,46 @@ class OPTDecoder:
         if not isinstance(opt_data, dict):
             return None
             
-        # OpenPrintTag v1 spec uses integer keys (tags)
-        # 1: version, 2: vendor, 10: name, 11: material, 19: color ...
-        # Mapping based on openprinttag.org
+        # OpenPrintTag v1 spec uses integer keys
+        # 11: brand, 10: name, 9: material_type_id, 34/35: nozzle, 37/38: bed, 64: color
+        
+        # 1. Vendor
+        vendor = opt_data.get(11) or opt_data.get("vendor")
+        
+        # 2. Product Name
+        name = opt_data.get(10) or opt_data.get("name")
+        
+        # 3. Material
+        mat_id = opt_data.get(9) or opt_data.get("material_id")
+        material = self.MATERIAL_TYPES.get(mat_id) if mat_id else (opt_data.get("material") or "PETG")
+        
+        # 4. Color
+        color = None
+        color_map = opt_data.get(64)
+        if isinstance(color_map, dict):
+            # Key 0 is space (0=sRGB), Key 1 is value
+            if color_map.get(0) == 0:
+                val = color_map.get(1)
+                if isinstance(val, (bytes, bytearray)) and len(val) >= 3:
+                    color = val[:3].hex().upper()
+                elif isinstance(val, list) and len(val) >= 3:
+                    color = "".join([f"{c:02X}" for c in val[:3]])
+        
+        if not color:
+            color = opt_data.get("color") or "607D8B" # Default gray-blue
+            
         res = {
-            "vendor_name": opt_data.get(2) or opt_data.get("vendor"),
-            "name": opt_data.get(10) or opt_data.get("name"),
-            "filament_material_type": opt_data.get(11) or opt_data.get("material"),
-            "color_code": opt_data.get(19) or opt_data.get("color"),
+            "vendor_name": vendor,
+            "name": name,
+            "filament_material_type": material,
+            "color_code": color,
         }
         
-        # Handle bed/nozzle temps if present
-        bt = opt_data.get(34) or opt_data.get("bed_temperature")
-        if bt: res["bed_temperature"] = int(bt)
+        # Handle temps
+        bt = opt_data.get(37) or opt_data.get("bed_temperature")
+        if bt: res["bed_temperature"] = float(bt)
         
-        nt = opt_data.get(36) or opt_data.get("printing_temperature")
-        if nt: res["nozzle_temp"] = int(nt)
+        nt = opt_data.get(34) or opt_data.get("printing_temperature")
+        if nt: res["nozzle_temp"] = float(nt)
 
         return res
