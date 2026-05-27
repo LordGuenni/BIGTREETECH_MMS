@@ -71,6 +71,7 @@ class MmsServer:
 
         # Moonraker lane data push for slicer integration
         self.server.register_remote_method("moonraker_push_lane_data", self.push_lane_data)
+        self.server.register_remote_method("moonraker_pull_lane_data", self.pull_lane_data)
         self.server.register_remote_method("moonraker_cleanup_lane_data", self.cleanup_lane_data)
 
         # Replace file_manager/metadata with this file
@@ -668,6 +669,18 @@ class MmsServer:
                 logging.info("MMS Lane Data successfully pushed to Moonraker")
         except Exception as e:
             logging.error(f"Error pushing lane data: {e}")
+
+    async def pull_lane_data(self):
+        '''
+        Pulls lane data from Moonraker database for slicer integration (OrcaSlicer)
+        returns a dictionary of lane data objects mapped to 'lane{n}' keys
+        '''
+        try:
+            lane_items = await self.database.get_item("lane_data", None, {})
+            return lane_items or {}
+        except Exception as e:
+            logging.error(f"Error pulling lane data: {e}")
+            return {}
 
     async def cleanup_lane_data(self, num_gates):
         '''

@@ -304,6 +304,7 @@ class SlotPinInlet(BaseSlotPin):
 
         if self.mms_slot.autoload_is_enabled():
             self._autoload()
+        self.mms_slot.update_lane_data_empty_state()
 
     @check_ready
     def release(self, mcu_pin):
@@ -313,6 +314,7 @@ class SlotPinInlet(BaseSlotPin):
         if self.is_waiting():
             self.mms_slot.complete_drive_moving()
             self.stop_waiting()
+        self.mms_slot.update_lane_data_empty_state()
 
     def _autoload(self):
         mms_autoload = printer_adapter.get_mms_autoload()
@@ -336,6 +338,7 @@ class SlotPinGate(BaseSlotPin):
         if self.is_waiting():
             self.mms_slot.complete_drive_moving()
             self.stop_waiting()
+        self.mms_slot.update_lane_data_empty_state()
 
     @check_ready
     def release(self, mcu_pin):
@@ -344,6 +347,7 @@ class SlotPinGate(BaseSlotPin):
         if self.is_waiting():
             self.mms_slot.complete_drive_moving()
             self.stop_waiting()
+        self.mms_slot.update_lane_data_empty_state()
 
 
 class SlotPinGateInvert(BaseSlotPin):
@@ -427,6 +431,7 @@ class SlotPinOutlet(BaseSlotPin):
             self.mms_slot.complete_drive_moving()
             self.stop_waiting()
             return True
+        self.mms_slot.update_lane_data_empty_state()
         return False
 
     @check_ready
@@ -436,6 +441,7 @@ class SlotPinOutlet(BaseSlotPin):
             self.mms_slot.complete_drive_moving()
             self.stop_waiting()
             return True
+        self.mms_slot.update_lane_data_empty_state()
         return False
 
 
@@ -458,6 +464,7 @@ class SlotPinEntry(BaseSlotPin):
             self.mms_slot.complete_drive_moving()
             self.stop_waiting()
             return True
+        self.mms_slot.update_lane_data_empty_state()
         return False
 
     @check_ready
@@ -467,6 +474,7 @@ class SlotPinEntry(BaseSlotPin):
             # self.mms_slot.complete_drive_moving()
             self.stop_waiting()
             return True
+        self.mms_slot.update_lane_data_empty_state()
         return False
 
     def set_stepper(self, mms_stepper):

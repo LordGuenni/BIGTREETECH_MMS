@@ -254,6 +254,7 @@ class MMS:
         self._is_connected = True
 
     def _handle_klippy_ready(self):
+        self._moonraker_pull_lane_data()
         self._moonraker_sync_lane_data()
 
     def _handle_klippy_shutdown(self):
@@ -913,6 +914,113 @@ class MMS:
         mms_slot = self.get_mms_slot(slot_num)
         return mms_slot if mms_slot and hasattr(mms_slot, "meta") else None
 
+    def _normalize_lane_data_value(self, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value if value else None
+        return value
+
+    def _normalize_lane_data_number(self, value, field_name):
+        if value is None:
+            return None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        value = str(value).strip()
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            self.log_error(f"lane_data invalid {field_name}: '{value}'")
+            return None
+
+    def _normalize_lane_data_int(self, value, field_name):
+        if value is None:
+            return None
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value if value > 0 else None
+        value = str(value).strip()
+        if not value:
+            return None
+        try:
+            num = int(value)
+        except ValueError:
+            self.log_error(f"lane_data invalid {field_name}: '{value}'")
+            return None
+        return num if num > 0 else None
+
+    def _parse_lane_data_slot_num(self, lane_key, lane_value):
+        lane_str = None
+        if isinstance(lane_value, dict):
+            lane_str = lane_value.get("lane")
+        if not lane_str and isinstance(lane_key, str) and lane_key.startswith("lane"):
+            lane_str = lane_key[4:]
+        if lane_str is None:
+            return None
+        try:
+            return int(lane_str)
+        except (ValueError, TypeError):
+            return None
+
+    def _apply_lane_data_to_slot(self, mms_slot, lane_value):
+        filament_info = dict(mms_slot.meta.filament_info or {})
+        updated = False
+
+        def update_filament_info(key, value):
+            nonlocal updated
+            if value is None:
+                if key in filament_info:
+                    filament_info.pop(key, None)
+                    updated = True
+            else:
+                if filament_info.get(key) != value:
+                    filament_info[key] = value
+                    updated = True
+
+        vendor = self._normalize_lane_data_value(lane_value.get("vendor_name"))
+        name = self._normalize_lane_data_value(lane_value.get("name"))
+        material = self._normalize_lane_data_value(lane_value.get("material"))
+        color = self._normalize_lane_data_value(lane_value.get("color"))
+        if isinstance(color, str):
+            color = color.lstrip("#") or None
+        bed_temp = self._normalize_lane_data_number(
+            lane_value.get("bed_temp"), "BED_TEMP")
+        nozzle_temp = self._normalize_lane_data_number(
+            lane_value.get("nozzle_temp"), "NOZZLE_TEMP")
+        filament_id = self._normalize_lane_data_value(
+            lane_value.get("filament_id"))
+        spool_id = self._normalize_lane_data_int(
+            lane_value.get("spool_id"), "SPOOL_ID")
+
+        update_filament_info("filament_manufacturer", vendor)
+        if name is None:
+            update_filament_info("filament_type_detailed", None)
+            update_filament_info("color_name_a", None)
+        else:
+            update_filament_info("filament_type_detailed", name)
+        update_filament_info("filament_material_type", material)
+        update_filament_info("color_code", color)
+        update_filament_info("bed_temperature", bed_temp)
+        update_filament_info("nozzle_temp", nozzle_temp)
+        update_filament_info("filament_id", filament_id)
+
+        if mms_slot.meta.filament_color != color:
+            mms_slot.set_filament_color(color)
+            updated = True
+        if mms_slot.meta.filament_material != material:
+            mms_slot.set_filament_material(material)
+            updated = True
+        if mms_slot.meta.spool_id != spool_id:
+            mms_slot.set_spool_id(spool_id)
+            updated = True
+
+        if updated:
+            mms_slot.set_filament_info(filament_info)
+
+        return updated
+
     def _build_lane_data(self, mms_slot, scan_time):
         slot_meta = mms_slot.meta
         filament_info = slot_meta.filament_info or {}
@@ -974,6 +1082,35 @@ class MMS:
             "spool_id": spool_id,
             "filament_id": filament_info.get("filament_id") or None,
         }
+
+    def _moonraker_pull_lane_data(self):
+        if not self._is_connected:
+            return
+
+        try:
+            webhooks = printer_adapter.get_obj("webhooks")
+            lane_data = webhooks.call_remote_method("moonraker_pull_lane_data")
+        except Exception as e:
+            self.log_info_s(f"failed to pull lane data from Moonraker: {e}")
+            return
+
+        if not lane_data:
+            return
+        if isinstance(lane_data, dict) and isinstance(lane_data.get("value"), dict):
+            lane_data = lane_data.get("value")
+        if not isinstance(lane_data, dict):
+            return
+
+        for lane_key, lane_value in lane_data.items():
+            if not isinstance(lane_value, dict):
+                continue
+            slot_num = self._parse_lane_data_slot_num(lane_key, lane_value)
+            if slot_num is None or slot_num not in self.slot_num_lst:
+                continue
+            mms_slot = self._find_slot_for_moonraker(slot_num)
+            if not mms_slot:
+                continue
+            self._apply_lane_data_to_slot(mms_slot, lane_value)
 
     def _moonraker_push_lane_data(self, slot_nums=None):
         if not self._is_connected:
