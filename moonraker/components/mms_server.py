@@ -677,46 +677,59 @@ class MmsServer:
 
     async def pull_lane_data(self):
         '''
-        Pulls lane data from Moonraker database for slicer integration (OrcaSlicer)
-        returns a dictionary of lane data objects mapped to 'lane{n}' keys
+        Pulls lane data from Moonraker database and pushes it to Klipper via G-code
         '''
-        logging.info("MMS server: pull_lane_data called (v2)")
+        logging.info("MMS server: pull_lane_data called (v3)")
         try:
-            # Ensure database component is available
             db = self.server.lookup_component("database", None)
             if db is None:
-                logging.error("MMS server: database component not found during pull")
                 return {"error": "database component not found"}
                 
             lane_items = await db.get_item("lane_data", None, {})
-            logging.info(f"MMS server: raw lane_items from db: {lane_items}")
             
-            if not lane_items:
-                logging.info("MMS server: lane_data namespace is empty in db")
-                if self.spoolman_has_extras:
-                    logging.info("MMS server: attempting Spoolman fallback...")
-                    await self._initialize_mms()
-                    lane_items = {}
-                    for gate in range(self.nb_gates):
-                        spool_id = self._find_first_spool_id(self.printer_hostname, gate)
-                        if spool_id > 0:
-                            spool_info = self.spool_location.get(spool_id)
-                            if spool_info:
-                                attr = spool_info[2]
-                                lane_items[f"lane{gate}"] = {
-                                    "vendor_name": attr.get('vendor'),
-                                    "name": attr.get('name'),
-                                    "material": attr.get('material'),
-                                    "color": attr.get('color'),
-                                    "bed_temp": attr.get('bed_temp'),
-                                    "nozzle_temp": attr.get('temp'),
-                                    "lane": str(gate),
-                                    "spool_id": spool_id,
-                                    "filament_id": attr.get('filament_id'),
-                                }
-                    logging.info(f"MMS server: Spoolman fallback result: {lane_items}")
-                else:
-                    logging.info("MMS server: No Spoolman data available for fallback")
+            if not lane_items and self.spoolman_has_extras:
+                logging.info("MMS server: empty database, trying Spoolman fallback")
+                await self._initialize_mms()
+                lane_items = {}
+                for gate in range(self.nb_gates):
+                    spool_id = self._find_first_spool_id(self.printer_hostname, gate)
+                    if spool_id > 0:
+                        spool_info = self.spool_location.get(spool_id)
+                        if spool_info:
+                            attr = spool_info[2]
+                            lane_items[f"lane{gate}"] = {
+                                "vendor_name": attr.get('vendor'),
+                                "name": attr.get('name'),
+                                "material": attr.get('material'),
+                                "color": attr.get('color'),
+                                "bed_temp": attr.get('bed_temp'),
+                                "nozzle_temp": attr.get('temp'),
+                                "lane": str(gate),
+                            }
+
+            if lane_items:
+                logging.info(f"MMS server: pushing {len(lane_items)} lanes to Klipper")
+                for lane_key, data in lane_items.items():
+                    if not isinstance(data, dict): continue
+                    slot = data.get('lane')
+                    if slot is None: continue
+                    
+                    # Construct MMS_SLOT_MAP command
+                    parts = [f"MMS_SLOT_MAP SLOT={slot} QUIET=1"]
+                    if data.get('material'): parts.append(f"MATERIAL='{data['material']}'")
+                    if data.get('color'): parts.append(f"COLOR='{data['color']}'")
+                    if data.get('vendor_name'): parts.append(f"VENDOR='{data['vendor_name']}'")
+                    if data.get('name'): parts.append(f"NAME='{data['name']}'")
+                    
+                    # Handle temps (avoid 0.0 or None)
+                    bt = data.get('bed_temp')
+                    if bt and float(bt) > 0: parts.append(f"BED_TEMP={bt}")
+                    nt = data.get('nozzle_temp')
+                    if nt and float(nt) > 0: parts.append(f"NOZZLE_TEMP={nt}")
+                    
+                    cmd = " ".join(parts)
+                    logging.info(f"MMS server: executing {cmd}")
+                    await self.klippy_apis.run_gcode(cmd)
 
             return lane_items or {}
         except Exception as e:
