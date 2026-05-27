@@ -677,6 +677,31 @@ class MmsServer:
         '''
         try:
             lane_items = await self.database.get_item("lane_data", None, {})
+            logging.info(f"MMS Lane Data from database: {lane_items}")
+            
+            if not lane_items and self.spoolman_has_extras:
+                logging.info("MMS Lane Data empty, attempting to pull from Spoolman gate map")
+                await self._initialize_mms()
+                lane_items = {}
+                for gate in range(self.nb_gates):
+                    spool_id = self._find_first_spool_id(self.printer_hostname, gate)
+                    if spool_id > 0:
+                        spool_info = self.spool_location.get(spool_id)
+                        if spool_info:
+                            attr = spool_info[2]
+                            lane_items[f"lane{gate}"] = {
+                                "vendor_name": attr.get('vendor'),
+                                "name": attr.get('name'),
+                                "material": attr.get('material'),
+                                "color": attr.get('color'),
+                                "bed_temp": attr.get('bed_temp'),
+                                "nozzle_temp": attr.get('temp'),
+                                "lane": str(gate),
+                                "spool_id": spool_id,
+                                "filament_id": attr.get('filament_id'),
+                            }
+                logging.info(f"MMS Lane Data from Spoolman: {lane_items}")
+
             return lane_items or {}
         except Exception as e:
             logging.error(f"Error pulling lane data: {e}")

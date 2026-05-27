@@ -257,10 +257,11 @@ class MMS:
         reactor = printer_adapter.get_reactor()
         reactor.register_timer(
             callback=self._delayed_moonraker_sync,
-            waketime=reactor.monotonic() + 2.0
+            waketime=reactor.monotonic() + 5.0
         )
 
     def _delayed_moonraker_sync(self, eventtime):
+        self.log_info("starting delayed Moonraker lane_data sync")
         self._moonraker_pull_lane_data()
         self._moonraker_sync_lane_data()
         return printer_adapter.get_reactor().NEVER
@@ -360,7 +361,7 @@ class MMS:
             ("MMS_SLOT_MATERIAL", self.cmd_MMS_SLOT_MATERIAL),
             ("MMS_SLOT_SPOOL", self.cmd_MMS_SLOT_SPOOL),
             ("MMS_SLOT_MAP", self.cmd_MMS_SLOT_MAP),
-
+            ("MMS_LANE_DATA_PULL", self.cmd_MMS_LANE_DATA_PULL),
             ("MMS_SLOT_META", self.cmd_MMS_SLOT_META),
             ("MMS_SLOT_META_TRUNCATE", self.cmd_MMS_SLOT_META_TRUNCATE),
 
@@ -1099,29 +1100,34 @@ class MMS:
             webhooks = printer_adapter.get_obj("webhooks")
             lane_data = webhooks.call_remote_method("moonraker_pull_lane_data")
         except Exception as e:
-            self.log_info_s(f"failed to pull lane data from Moonraker: {e}")
+            self.log_info(f"failed to pull lane data from Moonraker: {e}")
             return
+
+        self.log_info(f"moonraker_pull_lane_data raw response: {lane_data} (type: {type(lane_data)})")
 
         if isinstance(lane_data, str):
             try:
                 lane_data = json.loads(lane_data)
+                self.log_info(f"lane_data after json.loads: {lane_data}")
             except Exception as e:
-                self.log_info_s(f"failed to decode lane data: {e}")
+                self.log_info(f"failed to decode lane data: {e}")
                 return
 
         if not lane_data:
-            self.log_info_s("moonraker_pull_lane_data returned empty result")
+            self.log_info("moonraker_pull_lane_data returned empty result after json check")
             return
 
         # Handle different response formats (wrapped in result/value or direct)
         if isinstance(lane_data, dict):
             if isinstance(lane_data.get("result"), dict):
                 lane_data = lane_data.get("result")
+                self.log_info(f"lane_data after extracting 'result': {lane_data}")
             if isinstance(lane_data.get("value"), dict):
                 lane_data = lane_data.get("value")
+                self.log_info(f"lane_data after extracting 'value': {lane_data}")
 
         if not isinstance(lane_data, dict):
-            self.log_info_s(f"lane_data is not a dictionary: {type(lane_data)}")
+            self.log_info(f"lane_data is not a dictionary: {type(lane_data)}")
             return
 
         updated_count = 0
@@ -1138,7 +1144,9 @@ class MMS:
             updated_count += 1
 
         if updated_count > 0:
-            self.log_info_s(f"successfully synced {updated_count} lanes from Moonraker")
+            self.log_info(f"successfully synced {updated_count} lanes from Moonraker")
+        else:
+            self.log_info("no lanes were updated from lane_data")
 
     def _moonraker_push_lane_data(self, slot_nums=None):
         if not self._is_connected:
@@ -1575,6 +1583,15 @@ class MMS:
             mms_slot.set_filament_info(filament_info)
 
         return updated
+
+    def cmd_MMS_LANE_DATA_PULL(self, gcmd):
+        """
+        Usage:
+            MMS_LANE_DATA_PULL
+        """
+        self.log_info("manual Moonraker lane_data pull triggered")
+        self._moonraker_pull_lane_data()
+        self.log_info(self._format_slot_map(detail=True))
 
     def cmd_MMS_SLOT_MAP(self, gcmd):
         """
