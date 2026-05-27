@@ -1094,8 +1094,17 @@ class MMS:
             self.log_info_s(f"failed to pull lane data from Moonraker: {e}")
             return
 
+        if isinstance(lane_data, str):
+            try:
+                lane_data = json.loads(lane_data)
+            except Exception as e:
+                self.log_info_s(f"failed to decode lane data: {e}")
+                return
+
         if not lane_data:
             return
+        if isinstance(lane_data, dict) and isinstance(lane_data.get("result"), dict):
+            lane_data = lane_data.get("result")
         if isinstance(lane_data, dict) and isinstance(lane_data.get("value"), dict):
             lane_data = lane_data.get("value")
         if not isinstance(lane_data, dict):
