@@ -42,6 +42,7 @@ class MmsServer:
     def __init__(self, config: ConfigHelper):
         self.config = config
         self.server = config.get_server()
+        logging.info("MMS server: __init__")
         self.printer_info = self.server.get_host_info()
         self.spoolman = None
         if config.has_section("spoolman"): # Avoid exception if spoolman not configured
@@ -50,6 +51,7 @@ class MmsServer:
         self.klippy_apis: APIComp = self.server.lookup_component("klippy_apis")
         self.http_client: HttpClient = self.server.lookup_component("http_client")
         self.database: MoonrakerDatabase = self.server.lookup_component("database")
+        logging.info(f"MMS server: components looked up, database: {self.database}")
 
         # Full cache of spool_ids and location + key attributes (printer, gate, attr_dict))
         self.spool_location = {}
@@ -94,14 +96,17 @@ class MmsServer:
             return tuple([int(n) for n in response.json()['version'].split('.')])
 
     async def component_init(self) -> None:
+        logging.info("MMS server: component_init")
         if self.spoolman is None:
-            logging.warning("Spoolman not available. MMS remote methods not available")
-            return
+            logging.warning("Spoolman not available. Spoolman remote methods not available")
 
         # Get current printer hostname
         self.printer_hostname = self.printer_info["hostname"]
         self.spoolman_has_extras = False
-        asyncio.create_task(self._init_spoolman(retry=3)) # Spoolman may start up after us so retry a few times
+        if self.spoolman:
+            asyncio.create_task(self._init_spoolman(retry=3)) # Spoolman may start up after us so retry a few times
+        else:
+            logging.info("MMS server: Skipping Spoolman init as component not found")
 
     async def _init_spoolman(self, retry=1) -> bool:
         '''
@@ -675,37 +680,49 @@ class MmsServer:
         Pulls lane data from Moonraker database for slicer integration (OrcaSlicer)
         returns a dictionary of lane data objects mapped to 'lane{n}' keys
         '''
+        logging.info("MMS server: pull_lane_data called (v2)")
         try:
-            lane_items = await self.database.get_item("lane_data", None, {})
-            logging.info(f"MMS Lane Data from database: {lane_items}")
+            # Ensure database component is available
+            db = self.server.lookup_component("database", None)
+            if db is None:
+                logging.error("MMS server: database component not found during pull")
+                return {"error": "database component not found"}
+                
+            lane_items = await db.get_item("lane_data", None, {})
+            logging.info(f"MMS server: raw lane_items from db: {lane_items}")
             
-            if not lane_items and self.spoolman_has_extras:
-                logging.info("MMS Lane Data empty, attempting to pull from Spoolman gate map")
-                await self._initialize_mms()
-                lane_items = {}
-                for gate in range(self.nb_gates):
-                    spool_id = self._find_first_spool_id(self.printer_hostname, gate)
-                    if spool_id > 0:
-                        spool_info = self.spool_location.get(spool_id)
-                        if spool_info:
-                            attr = spool_info[2]
-                            lane_items[f"lane{gate}"] = {
-                                "vendor_name": attr.get('vendor'),
-                                "name": attr.get('name'),
-                                "material": attr.get('material'),
-                                "color": attr.get('color'),
-                                "bed_temp": attr.get('bed_temp'),
-                                "nozzle_temp": attr.get('temp'),
-                                "lane": str(gate),
-                                "spool_id": spool_id,
-                                "filament_id": attr.get('filament_id'),
-                            }
-                logging.info(f"MMS Lane Data from Spoolman: {lane_items}")
+            if not lane_items:
+                logging.info("MMS server: lane_data namespace is empty in db")
+                if self.spoolman_has_extras:
+                    logging.info("MMS server: attempting Spoolman fallback...")
+                    await self._initialize_mms()
+                    lane_items = {}
+                    for gate in range(self.nb_gates):
+                        spool_id = self._find_first_spool_id(self.printer_hostname, gate)
+                        if spool_id > 0:
+                            spool_info = self.spool_location.get(spool_id)
+                            if spool_info:
+                                attr = spool_info[2]
+                                lane_items[f"lane{gate}"] = {
+                                    "vendor_name": attr.get('vendor'),
+                                    "name": attr.get('name'),
+                                    "material": attr.get('material'),
+                                    "color": attr.get('color'),
+                                    "bed_temp": attr.get('bed_temp'),
+                                    "nozzle_temp": attr.get('temp'),
+                                    "lane": str(gate),
+                                    "spool_id": spool_id,
+                                    "filament_id": attr.get('filament_id'),
+                                }
+                    logging.info(f"MMS server: Spoolman fallback result: {lane_items}")
+                else:
+                    logging.info("MMS server: No Spoolman data available for fallback")
 
             return lane_items or {}
         except Exception as e:
-            logging.error(f"Error pulling lane data: {e}")
-            return {}
+            logging.error(f"MMS server: Error in pull_lane_data: {e}")
+            logging.error(traceback.format_exc())
+            return {"error": str(e)}
 
     async def cleanup_lane_data(self, num_gates):
         '''
