@@ -128,15 +128,25 @@ class SlotRFID:
     def _handle_detected(self, data):
         if data:
             self.rfid_detect_end()
+            # Format UID as Hex for better readability
+            if isinstance(data, (list, bytes, bytearray)):
+                uid_hex = " ".join([f"{b:02X}" for c in [data] for b in c])
+            else:
+                uid_hex = str(data)
+                
             self.log_info(
-                f"slot[{self.slot_num}] RFID detect data:\n"
-                f"{data}"
+                f"slot[{self.slot_num}] RFID detect data (UID): {uid_hex}"
             )
 
             self.tag_uid = data
-            success = self.mms_delivery.mms_stop(self.slot_num)
-            if success:
-                self.rfid_read_begin()
+            # Make stop robust: even if it fails, try to start reading
+            try:
+                self.mms_delivery.mms_stop(self.slot_num)
+            except Exception as e:
+                self.log_info_s(f"slot[{self.slot_num}] mms_stop error (ignored): {e}")
+            
+            # Start read phase regardless
+            self.rfid_read_begin()
 
         elif self._detect_is_timeout():
             self.rfid_detect_end()

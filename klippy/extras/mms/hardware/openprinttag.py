@@ -44,7 +44,8 @@ class CBORDecoder:
             for _ in range(length):
                 key = self.decode()
                 val = self.decode()
-                res[key] = val
+                if key is not None:
+                    res[key] = val
             return res
         elif major == 6: # tag
             self._decode_uint(additional) # skip tag
@@ -88,8 +89,9 @@ class CBORDecoder:
         return 0
 
 class OPTDecoder:
-    # Material Type ID mapping from OpenPrintTag spec
+    # Material Type ID mapping from OpenPrintTag spec v1
     MATERIAL_TYPES = {
+        0: "GENERIC",
         1: "PLA",
         2: "PETG",
         3: "ABS",
@@ -108,7 +110,7 @@ class OPTDecoder:
         pass
 
     def parse_ndef(self, data):
-        # Find NDEF Message TLV (03) in NTAG raw data
+        # Find NDEF Message TLV (03)
         pos = 0
         while pos < len(data):
             if data[pos] == 0x03: # NDEF Tag
@@ -119,13 +121,12 @@ class OPTDecoder:
                     pos += 3
                 else:
                     pos += 1
-                # pos now points to the NDEF message
                 break
             pos += 1
         else:
             return None
 
-        # Parse NDEF record
+        # Parse NDEF record (MIME type support)
         if pos >= len(data): return None
         header = data[pos]
         pos += 1
@@ -156,7 +157,6 @@ class OPTDecoder:
         try:
             decoder = CBORDecoder(payload)
             full_data = {}
-            # Try to decode sequential CBOR objects (Meta, Main, Aux)
             while decoder.pos < len(payload):
                 obj = decoder.decode()
                 if isinstance(obj, dict):
@@ -172,18 +172,28 @@ class OPTDecoder:
         if not isinstance(opt_data, dict) or not opt_data:
             return None
             
-        # Vendor (11)
-        vendor = opt_data.get(11) or opt_data.get("vendor")
+        # 1. Name (Key 10)
+        name = str(opt_data.get(10) or opt_data.get("name", "Unknown"))
         
-        # Product Name (10)
-        name = opt_data.get(10) or opt_data.get("name")
+        # 2. Vendor (Key 11)
+        vendor = str(opt_data.get(11) or opt_data.get("vendor", "Generic"))
         
-        # Material (9)
-        mat_id = opt_data.get(9) or opt_data.get("material_id")
-        material = self.MATERIAL_TYPES.get(mat_id) if mat_id else (opt_data.get("material") or "PETG")
+        # 3. Material (Key 9)
+        mat_id = opt_data.get(9)
+        material = self.MATERIAL_TYPES.get(mat_id)
         
-        # Color (64)
-        color = None
+        # Heuristic Backup: If ID is missing or 0, check name for keywords
+        if not material or material == "GENERIC":
+            name_u = name.upper()
+            if "PETG" in name_u: material = "PETG"
+            elif "PLA" in name_u: material = "PLA"
+            elif "ABS" in name_u: material = "ABS"
+            elif "ASA" in name_u: material = "ASA"
+            elif "TPU" in name_u: material = "TPU"
+            else: material = material or "PETG"
+        
+        # 4. Color (Key 64)
+        color = "607D8B"
         color_map = opt_data.get(64)
         if isinstance(color_map, dict):
             if color_map.get(0) == 0: # sRGB
@@ -193,9 +203,6 @@ class OPTDecoder:
                 elif isinstance(val, list) and len(val) >= 3:
                     color = "".join([f"{c:02X}" for c in val[:3]])
         
-        if not color:
-            color = opt_data.get("color") or "607D8B"
-            
         res = {
             "vendor_name": vendor,
             "name": name,
@@ -204,10 +211,13 @@ class OPTDecoder:
         }
         
         # Temps (37=bed, 34=nozzle)
-        bt = opt_data.get(37) or opt_data.get("bed_temperature")
-        if bt: res["bed_temperature"] = float(bt)
-        
-        nt = opt_data.get(34) or opt_data.get("printing_temperature")
-        if nt: res["nozzle_temp"] = float(nt)
+        try:
+            bt = opt_data.get(37)
+            if bt is not None: res["bed_temperature"] = float(bt[0]) if isinstance(bt, list) else float(bt)
+            
+            nt = opt_data.get(34)
+            if nt is not None: res["nozzle_temp"] = float(nt[0]) if isinstance(nt, list) else float(nt)
+        except Exception:
+            pass
 
         return res

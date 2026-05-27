@@ -281,8 +281,11 @@ class PeriodicTask:
         Clean up the MMS service by unregistering the timer and clearing
         the function references.
         """
-        if self.timer:
-            self.reactor.unregister_timer(self.timer)
+        if self.timer and self.reactor:
+            try:
+                self.reactor.unregister_timer(self.timer)
+            except Exception:
+                pass
             self.timer = None
 
         if self.func:
