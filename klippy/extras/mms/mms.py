@@ -254,8 +254,16 @@ class MMS:
         self._is_connected = True
 
     def _handle_klippy_ready(self):
+        reactor = printer_adapter.get_reactor()
+        reactor.register_timer(
+            callback=self._delayed_moonraker_sync,
+            waketime=reactor.monotonic() + 2.0
+        )
+
+    def _delayed_moonraker_sync(self, eventtime):
         self._moonraker_pull_lane_data()
         self._moonraker_sync_lane_data()
+        return printer_adapter.get_reactor().NEVER
 
     def _handle_klippy_shutdown(self):
         if self.mms_logger:
@@ -1102,14 +1110,21 @@ class MMS:
                 return
 
         if not lane_data:
-            return
-        if isinstance(lane_data, dict) and isinstance(lane_data.get("result"), dict):
-            lane_data = lane_data.get("result")
-        if isinstance(lane_data, dict) and isinstance(lane_data.get("value"), dict):
-            lane_data = lane_data.get("value")
-        if not isinstance(lane_data, dict):
+            self.log_info_s("moonraker_pull_lane_data returned empty result")
             return
 
+        # Handle different response formats (wrapped in result/value or direct)
+        if isinstance(lane_data, dict):
+            if isinstance(lane_data.get("result"), dict):
+                lane_data = lane_data.get("result")
+            if isinstance(lane_data.get("value"), dict):
+                lane_data = lane_data.get("value")
+
+        if not isinstance(lane_data, dict):
+            self.log_info_s(f"lane_data is not a dictionary: {type(lane_data)}")
+            return
+
+        updated_count = 0
         for lane_key, lane_value in lane_data.items():
             if not isinstance(lane_value, dict):
                 continue
@@ -1120,6 +1135,10 @@ class MMS:
             if not mms_slot:
                 continue
             self._apply_lane_data_to_slot(mms_slot, lane_value)
+            updated_count += 1
+
+        if updated_count > 0:
+            self.log_info_s(f"successfully synced {updated_count} lanes from Moonraker")
 
     def _moonraker_push_lane_data(self, slot_nums=None):
         if not self._is_connected:
@@ -1146,8 +1165,6 @@ class MMS:
             self.log_info_s(f"failed to push lane data to Moonraker: {e}")
 
     def _moonraker_sync_lane_data(self):
-        self._moonraker_push_lane_data()
-
         try:
             webhooks = printer_adapter.get_obj("webhooks")
             webhooks.call_remote_method(
