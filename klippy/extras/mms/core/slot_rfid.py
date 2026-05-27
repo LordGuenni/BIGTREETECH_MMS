@@ -9,6 +9,7 @@ import time
 from contextlib import contextmanager
 
 from ..adapters import printer_adapter
+from ..hardware.openprinttag import OPTDecoder
 
 
 class SlotRFID:
@@ -247,25 +248,53 @@ class SlotRFID:
             try:
                 self.tag_data = json.loads(data)
                 self.tag_color = self.tag_data.get("color_code")
-                self.mms_slot.set_filament_color(self.tag_color)
-                self.mms_slot.set_filament_material(
-                    self.tag_data.get("filament_material_type")
-                )
-                self.mms_slot.set_filament_info(self.tag_data)
-
-                mms = printer_adapter.get_mms()
-                if mms:
-                    mms.notify_lane_data_changed([self.slot_num])
-
-                # Set LED color
-                self.mms_slot.slot_led.rfid_set_color(self.tag_color)
+                self._apply_tag_data()
             except Exception as e:
-                self.log_error(
-                    f"slot[{self.slot_num}] RFID read tag data error: {e}")
+                # If JSON fails, it might be an OpenPrintTag (binary)
+                self.log_info(f"slot[{self.slot_num}] JSON decode failed, trying OpenPrintTag...")
+                self._try_openprinttag_read()
 
         elif time.time()-self.read_begin_at > self.read_duration:
             self.rfid_read_end()
             self.log_info(f"slot[{self.slot_num}] RFID read timeout")
+
+    def _try_openprinttag_read(self):
+        try:
+            # OPT usually uses NTAG/Type 2 which doesn't need auth per sector
+            raw_data = self.mms_rfid.rfid_manager.handler.read_ntag_loop()
+            if not raw_data:
+                self.log_error(f"slot[{self.slot_num}] Failed to read NTAG data")
+                return
+
+            decoder = OPTDecoder()
+            opt_data = decoder.decode(raw_data)
+            if opt_data:
+                self.log_info(f"slot[{self.slot_num}] OpenPrintTag decoded: {opt_data}")
+                mapped = decoder.map_to_mms(opt_data)
+                if mapped:
+                    self.tag_data = mapped
+                    self.tag_color = mapped.get("color_code")
+                    self._apply_tag_data()
+            else:
+                self.log_error(f"slot[{self.slot_num}] Could not decode OpenPrintTag payload")
+        except Exception as e:
+            self.log_error(f"slot[{self.slot_num}] OpenPrintTag read error: {e}")
+
+    def _apply_tag_data(self):
+        if not self.tag_data: return
+        
+        self.mms_slot.set_filament_color(self.tag_color)
+        self.mms_slot.set_filament_material(
+            self.tag_data.get("filament_material_type")
+        )
+        self.mms_slot.set_filament_info(self.tag_data)
+
+        mms = printer_adapter.get_mms()
+        if mms:
+            mms.notify_lane_data_changed([self.slot_num])
+
+        # Set LED color
+        self.mms_slot.slot_led.rfid_set_color(self.tag_color)
 
     # ---- Flow ----
     @contextmanager

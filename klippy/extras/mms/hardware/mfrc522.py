@@ -1708,6 +1708,30 @@ class MFRC522Handler:
                 return block_data
         return None
 
+    def read_ntag_loop(self):
+        """
+        Read NTAG/Type 2 tag data (no authentication needed usually)
+        Reads up to 128 pages (512 bytes)
+        """
+        for _ in range(self.retry_times):
+            uid = self._prepare()
+            if not uid: continue
+            
+            data = bytearray()
+            # NTAG read command returns 4 pages (16 bytes) at once
+            for page in range(0, 128, 4):
+                try:
+                    res = self.read_block(page) # MFRC522 read_block uses PICC_CMD_READ
+                    if res:
+                        data.extend(res)
+                    else:
+                        break
+                except Exception:
+                    break
+            if data:
+                return data
+        return None
+
     def prepare_loop(self):
         """
         Begin the prepare loop, wait for the tag.
