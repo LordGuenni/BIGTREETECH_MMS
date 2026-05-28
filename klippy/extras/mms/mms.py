@@ -354,6 +354,7 @@ class MMS:
             ("MMS_RFID_WRITE", self.cmd_MMS_RFID_WRITE),
             ("MMS_RFID_TRUNCATE", self.cmd_MMS_RFID_TRUNCATE),
             ("MMS_RFID_RESET", self.cmd_MMS_RFID_RESET),
+            ("MMS_LOG", self.cmd_MMS_LOG),
 
             # SLOT Meta
             ("MMS_SLOT_COLOR", self.cmd_MMS_SLOT_COLOR),
@@ -1268,6 +1269,19 @@ class MMS:
         for mms_slot in self.mms_slots:
             mms_slot.slot_rfid.reset()
         self.log_info("MMS RFID reset end")
+
+    def cmd_MMS_LOG(self, gcmd):
+        """
+        Usage:
+            MMS_LOG MSG='<msg>' ERROR=<0|1>
+        """
+        msg = gcmd.get("MSG")
+        is_error = gcmd.get_int("ERROR", 0)
+
+        if is_error:
+            self.log_error_s(msg)
+        else:
+            self.log_info_s(msg)
 
     def cmd_MMS_SLOT_COLOR(self, gcmd):
         """
