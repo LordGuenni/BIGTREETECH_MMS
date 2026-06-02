@@ -28,6 +28,7 @@ class MMSController:
         self._slot_selected_callback = None
         self._slot_delivery_play_callback = None
         self._slot_delivery_pause_callback = None
+        self._slot_empty_callback = None
         self._heater_temp_callback = None
 
         self._slot_delivery_is_playing = False
@@ -141,8 +142,33 @@ class MMSController:
             if slot_dct.get("selector"):
                 self._slot_selected_callback(slot_num=int(slot_num_str))
 
+            # Update is_empty
+            is_empty = slot_dct.get("is_empty")
+            if is_empty is None:
+                is_empty = self._is_slot_empty(slot_dct)
+
+            if self._slot_empty_callback:
+                self._slot_empty_callback(
+                    slot_num=int(slot_num_str), 
+                    is_empty=is_empty
+                )
+
+    def _is_slot_empty(self, slot_dct):
+        inlet = slot_dct.get("inlet", 0)
+        gate = slot_dct.get("gate", 0)
+        outlet = slot_dct.get("outlet", 0)
+        entry = slot_dct.get("entry", 0)
+
+        # entry can be None if not configured
+        if inlet or gate or outlet or (entry is not None and entry):
+            return False
+        return True
+
     def register_slot_selected_callback(self, func):
         self._slot_selected_callback = func
+
+    def register_slot_empty_callback(self, func):
+        self._slot_empty_callback = func
 
     # ---- MMS Steppers ----
     def _parse_mms_steppers(self, data):

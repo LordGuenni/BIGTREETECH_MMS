@@ -110,6 +110,17 @@ margin: top right bottom left;
     /* backdrop-filter: blur(3px); */
 }
 
+.vvd-modal-overlay {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.vvd-modal-box {
+    background-color: var(--secondary-color);
+    border-radius: var(--border-radius-main);
+    border: 0.2em solid var(--primary-color);
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.5);
+}
+
 .vvd-slot-window {
     background-color: var(--secondary-color);
     /* border-color: var(--color-indigo);
