@@ -90,9 +90,52 @@ class SlotRFID:
         return self.enable
 
     # ---- Write ----
-    def rfid_write(self):
+    def align_and_write(self, data):
+        mms = printer_adapter.get_mms()
+        # Safety checks
+        if mms.printer_is_printing():
+            self.log_warning(f"slot[{self.slot_num}] printer is printing, skip alignment")
+            return self.rfid_write(data)
+            
+        if self.mms_slot.gate.is_triggered():
+            self.log_warning(f"slot[{self.slot_num}] filament is loaded past gate, skip alignment")
+            return self.rfid_write(data)
+            
+        if self.mms_slot.is_empty():
+            self.log_warning(f"slot[{self.slot_num}] is empty, nothing to align")
+            return self.rfid_write(data)
+            
+        self.log_info(f"slot[{self.slot_num}] aligning RFID tag...")
+        
+        from .exceptions import DeliveryTerminateSignal
+        
+        self.tag_uid = None
+        self.detect_only_begin()
+        
+        mms_delivery = printer_adapter.get_mms_delivery()
+        try:
+            # Wiggle backward
+            mms_delivery.drip_move_backward(self.slot_num, distance=100, speed=10)
+            if not self.tag_uid:
+                # Wiggle forward
+                mms_delivery.drip_move_forward(self.slot_num, distance=100, speed=10)
+        except DeliveryTerminateSignal:
+            pass # tag was found and movement stopped by _handle_detected_only
+        except Exception as e:
+            self.log_warning(f"slot[{self.slot_num}] align interrupted: {e}")
+            
+        self.detect_only_end()
+        
+        if not self.tag_uid:
+            self.log_warning(f"slot[{self.slot_num}] RFID tag not detected during alignment")
+        else:
+            self.log_info(f"slot[{self.slot_num}] RFID tag aligned")
+            
+        return self.rfid_write(data)
+
+    def rfid_write(self, data):
         self.log_info(f"SLOT[{self.slot_num}] RFID write begin")
-        success = self.mms_rfid.write()
+        success = self.mms_rfid.write_ntag(data)
         result = "success" if success else "failed"
         self.log_info(f"SLOT[{self.slot_num}] RFID write {result}")
 
@@ -191,10 +234,16 @@ class SlotRFID:
 
     def _handle_detected_only(self, data):
         if data:
-            self.rfid_detect_end()
+            self.detect_only_end()
             self.tag_uid = data
             self.log_info(
                 f"slot[{self.slot_num}] RFID only detect data: {data}")
+            
+            try:
+                mms_delivery = printer_adapter.get_mms_delivery()
+                mms_delivery.mms_stop(self.slot_num)
+            except Exception:
+                pass
 
         elif self._detect_is_timeout():
             self.detect_only_end()

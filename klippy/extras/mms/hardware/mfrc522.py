@@ -202,6 +202,8 @@ class MFRC522Config:
     PICC_CMD_SEL_CL3: int = 0x97
     # Writes one 16 byte block to the authenticated sector of the PICC.
     PICC_CMD_WRITE: int = 0xA0
+    # Writes one 4 byte page to the MIFARE Ultralight/NTAG.
+    PICC_CMD_UL_WRITE: int = 0xA2
 
     PICC_CMD_HALT: int = 0x50
 
@@ -1425,6 +1427,30 @@ class MFRC522Handler:
 
         return True
 
+    def write_ntag_page(self, page_num, data):
+        """
+        Write a 4-byte page to NTAG/MIFARE Ultralight.
+        """
+        assert page_num in range(256), f"page {page_num} is out of range(256)"
+        assert len(data) == 4, f"NTAG write requires exactly 4 bytes, got {len(data)}"
+        
+        buffer = [self.config.PICC_CMD_UL_WRITE, page_num] + list(data)
+        try:
+            buffer += self.pcd_calculate_CRC(buffer)[:2]
+            status, back_data, back_bits = self.pcd_to_picc(
+                command=self.config.PCD_TRANSCEIVE,
+                send_data=buffer, need_bits_len=True)
+        except Exception as e:
+            logging.error(f"write ntag page error: {e}")
+            return False
+
+        if status != self.status.OK or back_bits != 4 or (back_data[0] & 0x0F) != 0x0A:
+            logging.error(f"Write ntag page failed, status: {status}")
+            return False
+            
+        logging.info(f"Data written to ntag page: {page_num}")
+        return True
+
     # Bussiness func
     def format_block_data(self, block_data):
         """
@@ -1756,6 +1782,30 @@ class MFRC522Handler:
             if data:
                 return data
         return None
+
+    def write_ntag_loop(self, data, start_page=4):
+        """
+        Write a bytearray to NTAG starting at start_page.
+        """
+        for _ in range(self.retry_times):
+            uid = self._prepare()
+            if not uid: continue
+            
+            success = True
+            for i in range(0, len(data), 4):
+                page_data = data[i:i+4]
+                # Pad with zeros if less than 4 bytes
+                if len(page_data) < 4:
+                    page_data.extend([0] * (4 - len(page_data)))
+                
+                page_num = start_page + (i // 4)
+                if not self.write_ntag_page(page_num, page_data):
+                    success = False
+                    break
+            
+            if success:
+                return True
+        return False
 
     def prepare_loop(self):
         """

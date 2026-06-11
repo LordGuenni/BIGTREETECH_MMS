@@ -299,11 +299,6 @@ class MMSRfid:
             key = "NAME", value = self.name,
             func = self.cmd_MMS_RFID_READ
         )
-        gcode_adapter.register_mux(
-            cmd = "MMS_RFID_WRITE_DEV",
-            key = "NAME", value = self.name,
-            func = self.cmd_MMS_RFID_WRITE
-        )
         # gcode_adapter.register_mux(
         #     cmd = "MMS_RFID_READ_TAGS",
         #     key = "NAME", value = self.name,
@@ -322,73 +317,29 @@ class MMSRfid:
         self.periodic_task.set_timeout(duration)
 
     # ---- Tag write ----
-    def _load_rfid_file(self):
-         # Most likely return "/home/.../printer_data/config/printer.cfg"
-        cfg_path = printer_adapter.get_klippy_configfile()
-        # base_dir should be "/home/.../printer_data/config/"
-        base_dir = os.path.dirname(cfg_path)
-        # filename should be "rfid_write.json"
-        filename = os.path.basename(self.rfid_data_file)
-
-        full_path = None
-        json_data = None
-
-        for root, _, files in os.walk(base_dir):
-            if filename in files:
-                full_path = os.path.join(root, filename)
-                if self.rfid_data_file in full_path:
-                    try:
-                        with open(full_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                        json_data = json.loads(content)
-                    except json.JSONDecodeError as e:
-                        self.log_error(f"JSON decode error ({full_path}): {e}")
-                    except Exception as e:
-                        self.log_error(f"open file error {full_path}: {e}")
-
-        return full_path, json_data
-
-        # full_path = os.path.join(base_dir, self.rfid_data_file)
-        # try:
-        #     with open(full_path, 'r', encoding='utf-8') as f:
-        #         content = f.read()
-        #     json_data = json.loads(content)
-        # except json.JSONDecodeError as e:
-        #     self.log_error(f"JSON decode error ({full_path}): {e}")
-        # except Exception as e:
-        #     self.log_error(f"open file error {full_path}: {e}")
-
-    def write(self):
-        full_path, json_data = self._load_rfid_file()
-        if not json_data:
-            self.log_warning(
-                f"RFID[{self.name}] write load rfid file failed"
-            )
+    def write_ntag(self, data_json):
+        try:
+            data = json.loads(data_json)
+        except Exception as e:
+            self.log_error(f"JSON decode error: {e}")
             return False
 
-        # Setup model
-        rfid_model = self.rfid_manager.new_rfid_model()
-        rfid_model.from_dict(json_data)
+        from .openprinttag import OPTEncoder
+        encoder = OPTEncoder()
+        opt_data = encoder.map_from_mms(data)
+        ndef_payload = encoder.encode(opt_data)
 
-        # Log data
-        data_encode_json = rfid_model.to_json()
-        self.log_info(
-            f"RFID[{self.name}] write\n"
-            "load data from file:\n"
-            f"{full_path}\n"
-            "data encode json:\n"
-            f"{data_encode_json}"
-        )
+        self.log_info(f"RFID[{self.name}] writing NTAG with payload length: {len(ndef_payload)}")
 
-        # Write to tag
-        prepared_blocks = rfid_model.prepare_blocks_writing()
-        for block_num, byte_array in prepared_blocks.items():
-            success = self.rfid_manager.rfid_write_block(block_num, byte_array)
-            if not success:
-                return False
+        with self.use_antenna():
+            success = self.handler.write_ntag_loop(ndef_payload, start_page=4)
 
-        self.rfid_manager.rfid_write_hash()
-        return True
+        if success:
+            self.log_info(f"RFID[{self.name}] NTAG write successful")
+            return True
+        else:
+            self.log_error(f"RFID[{self.name}] NTAG write failed")
+            return False
 
     # ---- Tag detect ----
     def detect_begin(self, callback):
@@ -587,15 +538,6 @@ class MMSRfid:
             self.read_begin(callback=self._handle_read)
         else:
             self.read_end()
-
-    def cmd_MMS_RFID_WRITE(self, gcmd):
-        """
-        Usage:
-            MMS_RFID_WRITE_DEV NAME=mfrc522_0
-        """
-        self.log_info(f"RFID[{self.name}] write start")
-        self.write()
-        self.log_info(f"RFID[{self.name}] write finish")
 
     # def cmd_MMS_RFID_READ_TAGS(self, gcmd):
     #     self.rfid_manager.get_tags()

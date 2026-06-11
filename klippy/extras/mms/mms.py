@@ -1268,10 +1268,20 @@ class MMS:
 
     def cmd_MMS_RFID_WRITE(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)
+        data = gcmd.get("DATA", default="{}")
+        align = gcmd.get_int("ALIGN", default=1)
         if not self.slot_is_available(slot_num):
             return
         mms_slot = self.get_mms_slot(slot_num)
-        mms_slot.slot_rfid.rfid_write()
+        
+        if align:
+            mms_delivery = printer_adapter.get_mms_delivery()
+            mms_delivery.deliver_async_task(
+                mms_slot.slot_rfid.align_and_write,
+                {"data": data}
+            )
+        else:
+            mms_slot.slot_rfid.rfid_write(data)
 
     def cmd_MMS_RFID_TRUNCATE(self, gcmd):
         slot_num = gcmd.get_int("SLOT", minval=0)

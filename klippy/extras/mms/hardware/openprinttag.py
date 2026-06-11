@@ -218,3 +218,172 @@ class OPTDecoder:
             pass
 
         return res
+
+class CBOREncoder:
+    def __init__(self):
+        self.data = bytearray()
+
+    def encode(self, obj):
+        if isinstance(obj, int):
+            if obj >= 0:
+                self._encode_type(0, obj)
+            else:
+                self._encode_type(1, -1 - obj)
+        elif isinstance(obj, bytes) or isinstance(obj, bytearray):
+            self._encode_type(2, len(obj))
+            self.data.extend(obj)
+        elif isinstance(obj, str):
+            utf8_data = obj.encode('utf-8')
+            self._encode_type(3, len(utf8_data))
+            self.data.extend(utf8_data)
+        elif isinstance(obj, list):
+            self._encode_type(4, len(obj))
+            for item in obj:
+                self.encode(item)
+        elif isinstance(obj, dict):
+            self._encode_type(5, len(obj))
+            for key, val in obj.items():
+                self.encode(key)
+                self.encode(val)
+        elif isinstance(obj, float):
+            # Float32 (simplified)
+            self.data.append((7 << 5) | 26)
+            self.data.extend(struct.pack(">f", obj))
+        elif isinstance(obj, bool):
+            self.data.append((7 << 5) | (21 if obj else 20))
+        elif obj is None:
+            self.data.append((7 << 5) | 22)
+        return self.data
+
+    def _encode_type(self, major, val):
+        if val < 24:
+            self.data.append((major << 5) | val)
+        elif val < 256:
+            self.data.append((major << 5) | 24)
+            self.data.append(val)
+        elif val < 65536:
+            self.data.append((major << 5) | 25)
+            self.data.extend(struct.pack(">H", val))
+        elif val < 4294967296:
+            self.data.append((major << 5) | 26)
+            self.data.extend(struct.pack(">I", val))
+        else:
+            self.data.append((major << 5) | 27)
+            self.data.extend(struct.pack(">Q", val))
+
+
+class OPTEncoder:
+    MATERIAL_TYPES_INV = {v: k for k, v in OPTDecoder.MATERIAL_TYPES.items()}
+
+    # Mapping of OpenPrintTag string names to their integer keys
+    KEY_MAPPING = {
+        "instance_uuid": 0, "package_uuid": 1, "material_uuid": 2, "brand_uuid": 3,
+        "gtin": 4, "brand_specific_instance_id": 5, "brand_specific_package_id": 6,
+        "brand_specific_material_id": 7, "material_class": 8, "material_type": 9,
+        "material_name": 10, "brand_name": 11, "write_protection": 13,
+        "manufactured_date": 14, "expiration_date": 15, "nominal_netto_full_weight": 16,
+        "actual_netto_full_weight": 17, "empty_container_weight": 18, "primary_color": 19,
+        "secondary_color_0": 20, "secondary_color_1": 21, "secondary_color_2": 22,
+        "secondary_color_3": 23, "secondary_color_4": 24, "transmission_distance": 27,
+        "tags": 28, "density": 29, "filament_diameter": 30, "shore_hardness_a": 31,
+        "shore_hardness_d": 32, "min_nozzle_diameter": 33, "min_print_temperature": 34,
+        "max_print_temperature": 35, "preheat_temperature": 36, "min_bed_temperature": 37,
+        "max_bed_temperature": 38, "min_chamber_temperature": 39, "max_chamber_temperature": 40,
+        "chamber_temperature": 41, "container_width": 42, "container_outer_diameter": 43,
+        "container_inner_diameter": 44, "container_hole_diameter": 45,
+        "viscosity_18c": 46, "viscosity_25c": 47, "viscosity_40c": 48, "viscosity_60c": 49,
+        "container_volumetric_capacity": 50, "cure_wavelength": 51,
+        "material_abbreviation": 52, "nominal_full_length": 53, "actual_full_length": 54,
+        "country_of_origin": 55, "certifications": 56, "drying_temperature": 57,
+        "drying_time": 58, "primary_color_lab": 59, "primary_color_ral": 60
+    }
+
+    def __init__(self):
+        pass
+
+    def map_from_mms(self, input_data):
+        opt_data = {}
+        
+        # Handle standard OpenPrintTag keys
+        for key, val in input_data.items():
+            if key in self.KEY_MAPPING:
+                cbor_key = self.KEY_MAPPING[key]
+                
+                # Handle special types
+                if key.endswith("uuid") and isinstance(val, str):
+                    import uuid
+                    try:
+                        opt_data[cbor_key] = uuid.UUID(val).bytes
+                    except:
+                        pass
+                elif "color" in key and isinstance(val, str) and not key.endswith("lab") and not key.endswith("ral"):
+                    val = val.replace("#", "")
+                    if len(val) == 6:
+                        opt_data[cbor_key] = bytes.fromhex(val + "FF")
+                    elif len(val) == 8:
+                        opt_data[cbor_key] = bytes.fromhex(val)
+                elif key == "material_type" and isinstance(val, str):
+                    opt_data[cbor_key] = self.MATERIAL_TYPES_INV.get(val.upper(), 0)
+                else:
+                    opt_data[cbor_key] = val
+
+        # Handle legacy MMS keys (fallback mapping)
+        if "filament_manufacturer" in input_data and 11 not in opt_data:
+            opt_data[11] = input_data["filament_manufacturer"]
+        if "filament_type_detailed" in input_data and 10 not in opt_data:
+            opt_data[10] = input_data["filament_type_detailed"]
+        if "filament_material_type" in input_data and 9 not in opt_data:
+            opt_data[9] = self.MATERIAL_TYPES_INV.get(input_data["filament_material_type"], 0)
+        if "color_code" in input_data and 19 not in opt_data:
+            color = input_data["color_code"].replace("#", "")
+            if len(color) == 6:
+                opt_data[19] = bytes.fromhex(color + "FF")
+            elif len(color) == 8:
+                opt_data[19] = bytes.fromhex(color)
+        if "bed_temperature" in input_data and 37 not in opt_data:
+            opt_data[37] = int(input_data["bed_temperature"])
+        if "nozzle_temp" in input_data and 34 not in opt_data:
+            opt_data[34] = int(input_data["nozzle_temp"])
+            
+        return opt_data
+
+    def encode(self, opt_data):
+        encoder = CBOREncoder()
+        # OpenPrintTag spec: Meta section comes first. We write an empty dict {} 
+        # to indicate main section follows immediately.
+        encoder.encode({}) 
+        # Then the Main section
+        encoder.encode(opt_data)
+        
+        cbor_data = encoder.data
+        
+        # NDEF formatting
+        type_str = b"openprinttag"
+        type_len = len(type_str)
+        payload_len = len(cbor_data)
+        
+        ndef = bytearray()
+        ndef.append(0x03) # NDEF Message TLV
+        
+        if payload_len + type_len + 4 < 255:
+            ndef.append(payload_len + type_len + 3) # len
+        else:
+            ndef.append(0xFF)
+            ndef.extend(struct.pack(">H", payload_len + type_len + 3))
+            
+        # NDEF Record Header: MB=1, ME=1, CF=0, SR=(1 if payload_len < 256 else 0), IL=0, TNF=0x02 (MIME)
+        sr = 1 if payload_len < 256 else 0
+        header = 0b11000000 | (sr << 4) | 0x02
+        ndef.append(header)
+        ndef.append(type_len)
+        
+        if sr:
+            ndef.append(payload_len)
+        else:
+            ndef.extend(struct.pack(">I", payload_len))
+            
+        ndef.extend(type_str)
+        ndef.extend(cbor_data)
+        ndef.append(0xFE) # TLV Terminator
+        
+        return ndef
