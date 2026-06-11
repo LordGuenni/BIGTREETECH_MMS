@@ -331,8 +331,8 @@ class MMSRfid:
 
         self.log_info(f"RFID[{self.name}] writing NTAG with payload length: {len(ndef_payload)}")
 
-        with self.use_antenna():
-            success = self.handler.write_ntag_loop(ndef_payload, start_page=4)
+        with self.rfid_manager.use_antenna():
+            success = self.rfid_manager.handler.write_ntag_loop(ndef_payload, start_page=4)
 
         if success:
             self.log_info(f"RFID[{self.name}] NTAG write successful")
