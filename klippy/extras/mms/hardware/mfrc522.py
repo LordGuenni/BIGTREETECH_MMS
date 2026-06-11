@@ -196,6 +196,10 @@ class MFRC522Config:
     PICC_CMD_AUTH_KEY_A: int = 0x60
     # Anti collision/Select, Cascade Level 1
     PICC_CMD_SEL_CL1: int = 0x93
+    # Anti collision/Select, Cascade Level 2
+    PICC_CMD_SEL_CL2: int = 0x95
+    # Anti collision/Select, Cascade Level 3
+    PICC_CMD_SEL_CL3: int = 0x97
     # Writes one 16 byte block to the authenticated sector of the PICC.
     PICC_CMD_WRITE: int = 0xA0
 
@@ -1060,7 +1064,7 @@ class MFRC522Handler:
         return status
 
     # PICC Related
-    def picc_select(self, uid):
+    def picc_select(self, uid, cmd=None):
         """
         Selects a tag or card for communication.
         Which also means transmits SELECT/ANTICOLLISION
@@ -1080,10 +1084,13 @@ class MFRC522Handler:
         """
         assert uid, f"Select get error UID: {uid}"
 
+        if cmd is None:
+            cmd = self.config.PICC_CMD_SEL_CL1
+
         buffer = []
 
         # Add the command byte and tag type to the buffer
-        buffer.append(self.config.PICC_CMD_SEL_CL1)
+        buffer.append(cmd)
         # Number of Valid Bits: Seven whole bytes
         buffer.append(0x70)
         # Add the serial number of the tag to the buffer
@@ -1246,14 +1253,17 @@ class MFRC522Handler:
 
         return status
 
-    def anticollision(self):
+    def anticollision(self, cmd=None):
         """
         Sends an anticollision command.
         Performs an anticollision algorithm to a tag or card
         to prevent multiple tags from responding.
         """
+        if cmd is None:
+            cmd = self.config.PICC_CMD_SEL_CL1
+
         # Append the PICC_ANTICOLL command and 0x20 to the buffer list
-        buffer = [self.config.PICC_CMD_SEL_CL1, 0x20]
+        buffer = [cmd, 0x20]
 
         # Set the BitFramingReg to 0x00
         self.write_reg("REG_BIT_FRAMING", self.config.PCD_IDLE)
@@ -1319,7 +1329,7 @@ class MFRC522Handler:
         Reads data from a specific block of a RFID card.
         """
         # Check block is valid
-        assert block_num in range(64), f"block {block_num} is out of range(64)"
+        assert block_num in range(256), f"block {block_num} is out of range(256)"
 
         err_msg = None
 
@@ -1360,8 +1370,8 @@ class MFRC522Handler:
         Argument "data" should be a list of 16 bytes data.
         """
         # Check block is valid
-        assert block_num in range(64), \
-            f"block {block_num} is out of range(64)"
+        assert block_num in range(256), \
+            f"block {block_num} is out of range(256)"
 
         buffer = [self.config.PICC_CMD_WRITE, block_num]
 
@@ -1477,35 +1487,50 @@ class MFRC522Handler:
     def _prepare(self):
         """
         Prepare for Read/Write blocks in Tag.
-        1. Request
-        2. Anti-collision
-        3. Select
-        4. Authenticate <- need block_num, do in bussiness func
-
-        Before Reading/Writing a new Sector, must be called everytime.
+        Handles both 4-byte and 7-byte (NTAG) UIDs through cascading.
         """
-        # Send request to RFID tag
+        # 1. Request
         status = self.request(mode=self.config.PICC_CMD_REQA)
         if status != self.status.OK:
             return None
 
-        # Anticollision, return UID if successful
-        status, uid = self.anticollision()
+        # 2. Anticollision / Select Cascading
+        # Cascade Level 1
+        status, uid = self.anticollision(self.config.PICC_CMD_SEL_CL1)
         if status != self.status.OK:
             return None
+        self.picc_select(uid, self.config.PICC_CMD_SEL_CL1)
 
-        if uid:
-            # Select the RFID tag
-            self.picc_select(uid)
+        # Check for Cascade Tag (0x88)
+        if uid[0] != 0x88:
+            return uid
 
-        return uid
+        # Cascade Level 2 (for 7-byte UIDs like NTAG)
+        full_uid = uid[1:4]
+        status, uid = self.anticollision(self.config.PICC_CMD_SEL_CL2)
+        if status != self.status.OK:
+            return full_uid
+        self.picc_select(uid, self.config.PICC_CMD_SEL_CL2)
+
+        if uid[0] != 0x88:
+            full_uid.extend(uid[:4])
+            return full_uid
+
+        # Cascade Level 3 (for 10-byte UIDs)
+        full_uid.extend(uid[1:4])
+        status, uid = self.anticollision(self.config.PICC_CMD_SEL_CL3)
+        if status != self.status.OK:
+            return full_uid
+        self.picc_select(uid, self.config.PICC_CMD_SEL_CL3)
+        full_uid.extend(uid[:4])
+        return full_uid
 
     def read_block_init(self, block_num):
         """
         Read data from the RFID tag.
         """
         # Check block is valid
-        assert block_num in range(64), f"block {block_num} is out of range(64)"
+        assert block_num in range(256), f"block {block_num} is out of range(256)"
 
         uid = self._prepare()
         if not uid:
@@ -1545,7 +1570,7 @@ class MFRC522Handler:
         assert uid, f"Read sector get error UID: {uid}"
 
          # Check block is valid
-        assert block_num in range(64), f"block {block_num} is out of range(64)"
+        assert block_num in range(256), f"block {block_num} is out of range(256)"
 
         # Authenticate with the tag using the provided key
         status = self.pcd_authenticate(
@@ -1615,7 +1640,7 @@ class MFRC522Handler:
         """
         assert uid, f"Read all blocks get error UID: {uid}"
 
-        block_num_lst = range(64)
+        block_num_lst = range(256)
         block_data_lst = []
 
         for block_num in block_num_lst:
@@ -1652,7 +1677,7 @@ class MFRC522Handler:
         assert uid, f"Write block single get error UID: {uid}"
 
         # Check sector is valid
-        assert block_num in range(64), f"block {block_num} is out of range(64)"
+        assert block_num in range(256), f"block {block_num} is out of range(256)"
 
         # Authenticate with the tag using the provided key
         self.pcd_authenticate(auth_mode=self.config.PICC_CMD_AUTH_KEY_A,
@@ -1719,7 +1744,7 @@ class MFRC522Handler:
             
             data = bytearray()
             # NTAG read command returns 4 pages (16 bytes) at once
-            for page in range(0, 128, 4):
+            for page in range(0, 256, 4):
                 try:
                     res = self.read_block(page) # MFRC522 read_block uses PICC_CMD_READ
                     if res:
