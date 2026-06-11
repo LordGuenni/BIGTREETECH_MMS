@@ -1581,6 +1581,7 @@ class MMS:
         quiet = gcmd.get_int("QUIET", default=0)
         detail = gcmd.get_int("DETAIL", default=0)
         reset = gcmd.get_int("RESET", default=0)
+        sync = gcmd.get_int("SYNC", default=0)
 
         vendor_raw = gcmd.get("VENDOR", default=None)
         name_raw = gcmd.get("NAME", default=None)
@@ -1673,7 +1674,7 @@ class MMS:
             if updated:
                 updated_slots.append(gate_num)
 
-        if updated_slots:
+        if updated_slots and not sync:
             self.notify_lane_data_changed(updated_slots)
 
         if not quiet:
