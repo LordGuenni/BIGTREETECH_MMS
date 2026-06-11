@@ -114,11 +114,19 @@ class SlotRFID:
         
         mms_delivery = printer_adapter.get_mms_delivery()
         try:
-            # Wiggle backward
-            mms_delivery.drip_move_backward(self.slot_num, distance=100, speed=10)
+            # Safely move forward until the gate triggers or we move 800mm (a full spool rotation)
+            mms_delivery._load_to_trigger(
+                self.slot_num, 
+                self.mms_slot.pin_type.gate, 
+                distance=800, 
+                speed=15
+            )
+            # If tag wasn't found going forward, try pulling back to original position
             if not self.tag_uid:
-                # Wiggle forward
-                mms_delivery.drip_move_forward(self.slot_num, distance=100, speed=10)
+                mms_drive = self.mms_slot.get_mms_drive()
+                distance_moved = mms_drive.get_distance_moved()
+                if distance_moved > 0:
+                    mms_delivery.drip_move_backward(self.slot_num, distance=distance_moved, speed=15)
         except DeliveryTerminateSignal:
             pass # tag was found and movement stopped by _handle_detected_only
         except Exception as e:
