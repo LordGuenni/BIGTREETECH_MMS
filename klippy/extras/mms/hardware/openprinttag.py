@@ -256,16 +256,14 @@ class CBOREncoder:
             self._encode_type(3, len(utf8_data))
             self.data.extend(utf8_data)
         elif isinstance(obj, list):
-            self.data.append(0x9F)  # indefinite array (SHOULD per spec)
+            self._encode_type(4, len(obj))
             for item in obj:
                 self.encode(item)
-            self.data.append(0xFF)  # break
         elif isinstance(obj, dict):
-            self.data.append(0xBF)  # indefinite map (SHOULD per spec)
+            self._encode_type(5, len(obj))
             for key, val in obj.items():
                 self.encode(key)
                 self.encode(val)
-            self.data.append(0xFF)  # break
         elif isinstance(obj, float):
             # Float32 (simplified)
             self.data.append((7 << 5) | 26)
@@ -373,55 +371,62 @@ class OPTEncoder:
         return opt_data
 
     def encode(self, opt_data):
-        # 1. Main Region: CBOR map of all material properties
-        main_encoder = CBOREncoder()
-        main_encoder.encode(opt_data)
-        main_data = bytes(main_encoder.data)
+        # 1. Main Region: definite CBOR map (matches working tag format)
+        main_enc = CBOREncoder()
+        main_enc.encode(opt_data)
+        main_data = bytes(main_enc.data)
+        main_size = len(main_data)
 
-        # 2. Aux Region: empty CBOR indefinite map (BF FF = 2 bytes)
-        aux_enc = CBOREncoder()
-        aux_enc.encode({})
-        aux_data = bytes(aux_enc.data)
+        # 2. Meta Region: definite CBOR map {0: MAIN_OFF, 1: main_size}
+        # meta key 0 = main_region_offset, key 1 = main_region_size (no aux region)
+        # MAIN_OFF = meta encoding size (self-consistent):
+        #   main_size <  24: A2 00 MM 01 SS       = 5 bytes → MAIN_OFF=5
+        #   main_size < 256: A2 00 MM 01 18 SS     = 6 bytes → MAIN_OFF=6
+        #   main_size <65536: A2 00 MM 01 19 SS SS = 7 bytes → MAIN_OFF=7
+        if main_size < 24:
+            MAIN_OFF = 5
+        elif main_size < 256:
+            MAIN_OFF = 6
+        else:
+            MAIN_OFF = 7
+        meta_enc = CBOREncoder()
+        meta_enc.encode({0: MAIN_OFF, 1: main_size})
+        meta_data = bytes(meta_enc.data)
 
-        # 3. Meta Region: CBOR indefinite map {0: MAIN_OFF, 2: AUX_OFF}
-        # With indefinite encoding {0: 7, 2: 234} = BF 00 07 02 18 EA FF = 7 bytes,
-        # so MAIN_OFF=7 is self-consistent (meta ends exactly where main begins).
-        # Aux region is aligned to a 4-byte page boundary for NTAG writes.
-        MAIN_OFF = 7
-        AUX_OFF = 236  # 4-byte aligned: meta(7)+main_max(229) → nearest multiple of 4
-        meta_encoder = CBOREncoder()
-        meta_encoder.encode({0: MAIN_OFF, 2: AUX_OFF})
-        meta_data = bytes(meta_encoder.data)
-
-        # 4. Assemble CBOR payload
+        # 3. CBOR payload = meta + main (no aux region)
         cbor_payload = bytearray()
-        cbor_payload.extend(meta_data)                              # bytes [0, MAIN_OFF)
-        cbor_payload.extend(main_data)                              # bytes [MAIN_OFF, ...)
-        if len(cbor_payload) < AUX_OFF:
-            cbor_payload.extend([0x00] * (AUX_OFF - len(cbor_payload)))
-        cbor_payload.extend(aux_data)                               # byte [AUX_OFF]
+        cbor_payload.extend(meta_data)  # bytes [0, MAIN_OFF)
+        cbor_payload.extend(main_data)  # bytes [MAIN_OFF, MAIN_OFF+main_size)
 
-        # 5. NDEF Record: header 0xC2 = MB+ME, SR=0 (long record), TNF=010 (MIME)
-        # The Capability Container lives at NTAG page 3 and is NOT written here.
-        # User memory starts at page 4 and must begin with the NDEF Message TLV (0x03).
+        # 4. NDEF Record
+        # The CC lives at NTAG page 3 and is NOT written here.
+        # User memory (page 4) must start with the NDEF Message TLV (0x03).
+        # Use SR=1 (Short Record, 1-byte payload length) when payload fits in 1 byte,
+        # matching the format produced by reference OpenPrintTag implementations.
         type_str = b"application/vnd.openprinttag"
+        cbor_len = len(cbor_payload)
         ndef_record = bytearray()
-        ndef_record.append(0xC2)                                    # header
-        ndef_record.append(len(type_str))                           # type length
-        ndef_record.extend(struct.pack(">I", len(cbor_payload)))    # payload length (4 bytes)
+        if cbor_len <= 255:
+            ndef_record.append(0xD2)                        # MB+ME+SR=1+TNF=MIME
+            ndef_record.append(len(type_str))
+            ndef_record.append(cbor_len)                    # 1-byte payload length
+        else:
+            ndef_record.append(0xC2)                        # MB+ME+SR=0+TNF=MIME
+            ndef_record.append(len(type_str))
+            ndef_record.extend(struct.pack(">I", cbor_len)) # 4-byte payload length
         ndef_record.extend(type_str)
         ndef_record.extend(cbor_payload)
 
-        # 6. NDEF Message TLV (type 0x03), written directly to page 4 (user memory start)
+        # 5. NDEF Message TLV (0x03) + Terminator (0xFE)
         ndef_len = len(ndef_record)
         result = bytearray()
-        result.append(0x03)                                         # NDEF Message TLV
+        result.append(0x03)
         if ndef_len > 0xFE:
             result.append(0xFF)
             result.extend(struct.pack(">H", ndef_len))
         else:
             result.append(ndef_len)
         result.extend(ndef_record)
-        result.append(0xFE)                                         # Terminator TLV
+        result.append(0xFE)
 
         return result
