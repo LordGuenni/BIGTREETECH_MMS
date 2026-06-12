@@ -358,29 +358,28 @@ class OPTEncoder:
         cbor_data = encoder.data
         
         # NDEF formatting
-        type_str = b"openprinttag"
+        type_str = b"application/vnd.openprinttag"
         type_len = len(type_str)
         payload_len = len(cbor_data)
         
         ndef = bytearray()
+        
+        # Capability Container (CC) record for Type 5 (E1 40 27 01)
+        ndef.extend([0xE1, 0x40, 0x27, 0x01])
+
         ndef.append(0x03) # NDEF Message TLV
         
-        if payload_len + type_len + 4 < 255:
-            ndef.append(payload_len + type_len + 3) # len
-        else:
-            ndef.append(0xFF)
-            ndef.extend(struct.pack(">H", payload_len + type_len + 3))
-            
-        # NDEF Record Header: MB=1, ME=1, CF=0, SR=(1 if payload_len < 256 else 0), IL=0, TNF=0x02 (MIME)
-        sr = 1 if payload_len < 256 else 0
-        header = 0b11000000 | (sr << 4) | 0x02
-        ndef.append(header)
-        ndef.append(type_len)
+        # Calculate length: Header(1) + TypeLen(1) + PayloadLen(4/SR=0) + TypeName + Payload
+        ndef_record_len = 1 + 1 + 4 + type_len + payload_len
         
-        if sr:
-            ndef.append(payload_len)
-        else:
-            ndef.extend(struct.pack(">I", payload_len))
+        ndef.append(0xFF)
+        ndef.extend(struct.pack(">H", ndef_record_len))
+            
+        # NDEF Record Header: MB=1, ME=1, CF=0, SR=0 (Long), IL=0, TNF=0x02 (MIME)
+        # 0b11000010 = C2
+        ndef.append(0xC2)
+        ndef.append(type_len)
+        ndef.extend(struct.pack(">I", payload_len))
             
         ndef.extend(type_str)
         ndef.extend(cbor_data)
