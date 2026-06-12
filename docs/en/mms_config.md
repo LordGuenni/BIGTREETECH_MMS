@@ -191,6 +191,8 @@ After the command completes, the Z-axis returns to its original height.
 
 * **z_raise**: The height the Z-axis raises before filament change. After the filament change is complete, the Z-axis will return to its original height.
 
+* **skip_same_slot**: When enabled (default), the system will skip the swap process if the requested tool (after mapping) is already the currently loaded tool. This prevents redundant purges and brushes.
+
 * **command_string**: The name of the filament change gcode command. The default `T` means the gcode commands will be `T0`, `T1`, `T2`, `T3`, etc. **Do not modify this setting unless you clearly understand what it means.**
 
 * **safe_mode**: Adds M400 logic after each G1 movement command to ensure the current move is complete before proceeding to the next action. **Do not modify this setting unless you clearly understand what it means.**
