@@ -348,69 +348,52 @@ class OPTEncoder:
         return opt_data
 
     def encode(self, opt_data):
-        # 1. Main Section (CBOR)
+        # 1. Main Region: CBOR map of all material properties
         main_encoder = CBOREncoder()
         main_encoder.encode(opt_data)
-        main_data = main_encoder.data
-        
-        # 2. Auxiliary Section (Empty map 'a0')
-        aux_data = bytearray([0xA0])
-        
-        # Layout: Meta (start) -> Main (off 4) -> Aux (off 234)
-        # Meta: {0: 4, 2: 234} (main_region_offset: 4, aux_region_offset: 234)
+        main_data = bytes(main_encoder.data)
+
+        # 2. Aux Region: empty CBOR map (for dynamic fields like consumed weight)
+        aux_data = bytes([0xA0])
+
+        # 3. Meta Region: CBOR map {0: MAIN_OFF, 2: AUX_OFF}
+        # {0: 6, 2: 234} encodes to A2 00 06 02 18 EA = exactly 6 bytes,
+        # so MAIN_OFF=6 is self-consistent (meta ends exactly where main begins).
+        MAIN_OFF = 6
+        AUX_OFF = 234
         meta_encoder = CBOREncoder()
-        meta_encoder.encode({0: 4, 2: 234})
-        meta_data = meta_encoder.data
-        
-        # 3. Construct Payload
-        payload = bytearray()
-        payload.extend(meta_data)
-        
-        # Padding until Main region at offset 4
-        payload.extend([0x00] * (4 - len(payload)))
-        
-        payload.extend(main_data)
-        
-        # Padding until Aux region at offset 234
-        padding_needed = 234 - len(payload)
-        if padding_needed > 0:
-            payload.extend([0x00] * padding_needed)
-            
-        payload.extend(aux_data)
-        
-        # Total payload size in reference bin was 269 bytes
-        final_padding = 269 - len(payload)
-        if final_padding > 0:
-            payload.extend([0x00] * final_padding)
+        meta_encoder.encode({0: MAIN_OFF, 2: AUX_OFF})
+        meta_data = bytes(meta_encoder.data)
 
-        # NDEF formatting
+        # 4. Assemble CBOR payload
+        cbor_payload = bytearray()
+        cbor_payload.extend(meta_data)                              # bytes [0, MAIN_OFF)
+        cbor_payload.extend(main_data)                              # bytes [MAIN_OFF, ...)
+        if len(cbor_payload) < AUX_OFF:
+            cbor_payload.extend([0x00] * (AUX_OFF - len(cbor_payload)))
+        cbor_payload.extend(aux_data)                               # byte [AUX_OFF]
+
+        # 5. NDEF Record: header 0xC2 = MB+ME, SR=0 (long record), TNF=010 (MIME)
+        # The Capability Container lives at NTAG page 3 and is NOT written here.
+        # User memory starts at page 4 and must begin with the NDEF Message TLV (0x03).
         type_str = b"application/vnd.openprinttag"
-        type_len = len(type_str)
-        payload_len = len(payload)
+        ndef_record = bytearray()
+        ndef_record.append(0xC2)                                    # header
+        ndef_record.append(len(type_str))                           # type length
+        ndef_record.extend(struct.pack(">I", len(cbor_payload)))    # payload length (4 bytes)
+        ndef_record.extend(type_str)
+        ndef_record.extend(cbor_payload)
 
-        # NDEF Record Header: C2 (Long Record, MIME)
-        header = 0b11000010 
-        
-        # Record size: Header (1) + Type Len (1) + Payload Len (4) + Type Name (28) + Payload
-        ndef_record_len = 1 + 1 + 4 + type_len + payload_len
+        # 6. NDEF Message TLV (type 0x03), written directly to page 4 (user memory start)
+        ndef_len = len(ndef_record)
+        result = bytearray()
+        result.append(0x03)                                         # NDEF Message TLV
+        if ndef_len > 0xFE:
+            result.append(0xFF)
+            result.extend(struct.pack(">H", ndef_len))
+        else:
+            result.append(ndef_len)
+        result.extend(ndef_record)
+        result.append(0xFE)                                         # Terminator TLV
 
-        ndef = bytearray()
-        # Capability Container (E1 40 13 01)
-        ndef.extend([0xE1, 0x40, 0x13, 0x01])
-
-        ndef.append(0x03)  # NDEF Message TLV (03)
-
-        # TLV Length (Long)
-        ndef.append(0xFF)
-        ndef.extend(struct.pack(">H", ndef_record_len))
-
-        # NDEF Record Body
-        ndef.append(header)
-        ndef.append(type_len)
-        ndef.extend(struct.pack(">I", payload_len)) # 4-byte payload length
-
-        ndef.extend(type_str)
-        ndef.extend(payload)
-        ndef.append(0xFE)  # TLV Terminator
-
-        return ndef
+        return result
