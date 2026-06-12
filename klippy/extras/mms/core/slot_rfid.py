@@ -89,21 +89,26 @@ class SlotRFID:
     def is_enabled(self):
         return self.enable
 
+    def is_reading(self):
+        if self.mms_rfid:
+            return self.mms_rfid.is_reading()
+        return False
+
     # ---- Write ----
     def align_and_write(self, data):
         mms = printer_adapter.get_mms()
         # Safety checks
         if mms.printer_is_printing():
-            self.log_warning(f"slot[{self.slot_num}] printer is printing, skip alignment")
-            return self.rfid_write(data)
+            self.log_error(f"slot[{self.slot_num}] printer is printing, write operation blocked")
+            return False
             
         if self.mms_slot.gate.is_triggered():
-            self.log_warning(f"slot[{self.slot_num}] filament is loaded past gate, skip alignment")
-            return self.rfid_write(data)
+            self.log_error(f"slot[{self.slot_num}] filament is loaded past gate, write operation blocked")
+            return False
             
-        if self.mms_slot.is_empty():
-            self.log_warning(f"slot[{self.slot_num}] is empty, nothing to align")
-            return self.rfid_write(data)
+        if not self.mms_slot.inlet.is_triggered():
+            self.log_error(f"slot[{self.slot_num}] slot is empty, write operation blocked")
+            return False
             
         self.log_info(f"slot[{self.slot_num}] aligning RFID tag...")
         
@@ -114,19 +119,13 @@ class SlotRFID:
         
         mms_delivery = printer_adapter.get_mms_delivery()
         try:
-            # Safely move forward until the gate triggers or we move 800mm (a full spool rotation)
-            mms_delivery._load_to_trigger(
+            # Safely move BACKWARD until the inlet releases or we move 800mm
+            mms_delivery._unload_to_release(
                 self.slot_num, 
-                self.mms_slot.pin_type.gate, 
+                self.mms_slot.pin_type.inlet, 
                 distance=800, 
-                speed=15
+                speed=40
             )
-            # If tag wasn't found going forward, try pulling back to original position
-            if not self.tag_uid:
-                mms_drive = self.mms_slot.get_mms_drive()
-                distance_moved = mms_drive.get_distance_moved()
-                if distance_moved > 0:
-                    mms_delivery.drip_move_backward(self.slot_num, distance=distance_moved, speed=15)
         except DeliveryTerminateSignal:
             pass # tag was found and movement stopped by _handle_detected_only
         except Exception as e:
@@ -134,18 +133,29 @@ class SlotRFID:
             
         self.detect_only_end()
         
+        success = False
         if not self.tag_uid:
             self.log_warning(f"slot[{self.slot_num}] RFID tag not detected during alignment")
         else:
-            self.log_info(f"slot[{self.slot_num}] RFID tag aligned")
+            self.log_info(f"slot[{self.slot_num}] RFID tag aligned, starting write...")
+            # Write IMMEDIATELY while the tag is at the antenna
+            success = self.rfid_write(data)
+
+        # NOW restore filament to the standard "Preload" position
+        try:
+            self.log_info(f"slot[{self.slot_num}] alignment sequence finished, restoring filament...")
+            mms_delivery.autoload_to_gate(self.slot_num)
+        except Exception as e:
+            self.log_warning(f"slot[{self.slot_num}] failed to restore filament position: {e}")
             
-        return self.rfid_write(data)
+        return success
 
     def rfid_write(self, data):
         self.log_info(f"SLOT[{self.slot_num}] RFID write begin")
         success = self.mms_rfid.write_ntag(data)
         result = "success" if success else "failed"
         self.log_info(f"SLOT[{self.slot_num}] RFID write {result}")
+        return success
 
     # ---- Detect ----
     def rfid_detect_begin(self):
