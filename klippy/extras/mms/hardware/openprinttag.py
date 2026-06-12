@@ -348,41 +348,69 @@ class OPTEncoder:
         return opt_data
 
     def encode(self, opt_data):
-        encoder = CBOREncoder()
-        # OpenPrintTag spec: Meta section comes first. We write an empty dict {} 
-        # to indicate main section follows immediately.
-        encoder.encode({}) 
-        # Then the Main section
-        encoder.encode(opt_data)
+        # 1. Main Section (CBOR)
+        main_encoder = CBOREncoder()
+        main_encoder.encode(opt_data)
+        main_data = main_encoder.data
         
-        cbor_data = encoder.data
+        # 2. Auxiliary Section (Empty map 'a0')
+        aux_data = bytearray([0xA0])
         
+        # Layout: Meta (start) -> Main (off 4) -> Aux (off 234)
+        # Meta: {0: 4, 2: 234} (main_region_offset: 4, aux_region_offset: 234)
+        meta_encoder = CBOREncoder()
+        meta_encoder.encode({0: 4, 2: 234})
+        meta_data = meta_encoder.data
+        
+        # 3. Construct Payload
+        payload = bytearray()
+        payload.extend(meta_data)
+        
+        # Padding until Main region at offset 4
+        payload.extend([0x00] * (4 - len(payload)))
+        
+        payload.extend(main_data)
+        
+        # Padding until Aux region at offset 234
+        padding_needed = 234 - len(payload)
+        if padding_needed > 0:
+            payload.extend([0x00] * padding_needed)
+            
+        payload.extend(aux_data)
+        
+        # Total payload size in reference bin was 269 bytes
+        final_padding = 269 - len(payload)
+        if final_padding > 0:
+            payload.extend([0x00] * final_padding)
+
         # NDEF formatting
         type_str = b"application/vnd.openprinttag"
         type_len = len(type_str)
-        payload_len = len(cbor_data)
-        
-        ndef = bytearray()
-        
-        # Capability Container (CC) record for Type 5 (E1 40 27 01)
-        ndef.extend([0xE1, 0x40, 0x27, 0x01])
+        payload_len = len(payload)
 
-        ndef.append(0x03) # NDEF Message TLV
+        # NDEF Record Header: C2 (Long Record, MIME)
+        header = 0b11000010 
         
-        # Calculate length: Header(1) + TypeLen(1) + PayloadLen(4/SR=0) + TypeName + Payload
+        # Record size: Header (1) + Type Len (1) + Payload Len (4) + Type Name (28) + Payload
         ndef_record_len = 1 + 1 + 4 + type_len + payload_len
-        
+
+        ndef = bytearray()
+        # Capability Container (E1 40 13 01)
+        ndef.extend([0xE1, 0x40, 0x13, 0x01])
+
+        ndef.append(0x03)  # NDEF Message TLV (03)
+
+        # TLV Length (Long)
         ndef.append(0xFF)
         ndef.extend(struct.pack(">H", ndef_record_len))
-            
-        # NDEF Record Header: MB=1, ME=1, CF=0, SR=0 (Long), IL=0, TNF=0x02 (MIME)
-        # 0b11000010 = C2
-        ndef.append(0xC2)
+
+        # NDEF Record Body
+        ndef.append(header)
         ndef.append(type_len)
-        ndef.extend(struct.pack(">I", payload_len))
-            
+        ndef.extend(struct.pack(">I", payload_len)) # 4-byte payload length
+
         ndef.extend(type_str)
-        ndef.extend(cbor_data)
-        ndef.append(0xFE) # TLV Terminator
-        
+        ndef.extend(payload)
+        ndef.append(0xFE)  # TLV Terminator
+
         return ndef
