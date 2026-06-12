@@ -36,9 +36,28 @@ class CBORDecoder:
             self.pos += length
             return res
         elif major == 4: # array
+            if additional == 31: # indefinite length
+                items = []
+                while self.pos < len(self.data):
+                    if self.data[self.pos] == 0xFF: # break code
+                        self.pos += 1
+                        break
+                    items.append(self.decode())
+                return items
             length = self._decode_uint(additional)
             return [self.decode() for _ in range(length)]
         elif major == 5: # map
+            if additional == 31: # indefinite length
+                res = {}
+                while self.pos < len(self.data):
+                    if self.data[self.pos] == 0xFF: # break code
+                        self.pos += 1
+                        break
+                    key = self.decode()
+                    val = self.decode()
+                    if key is not None:
+                        res[key] = val
+                return res
             length = self._decode_uint(additional)
             res = {}
             for _ in range(length):
@@ -237,14 +256,16 @@ class CBOREncoder:
             self._encode_type(3, len(utf8_data))
             self.data.extend(utf8_data)
         elif isinstance(obj, list):
-            self._encode_type(4, len(obj))
+            self.data.append(0x9F)  # indefinite array (SHOULD per spec)
             for item in obj:
                 self.encode(item)
+            self.data.append(0xFF)  # break
         elif isinstance(obj, dict):
-            self._encode_type(5, len(obj))
+            self.data.append(0xBF)  # indefinite map (SHOULD per spec)
             for key, val in obj.items():
                 self.encode(key)
                 self.encode(val)
+            self.data.append(0xFF)  # break
         elif isinstance(obj, float):
             # Float32 (simplified)
             self.data.append((7 << 5) | 26)
@@ -344,7 +365,11 @@ class OPTEncoder:
             opt_data[37] = int(input_data["bed_temperature"])
         if "nozzle_temp" in input_data and 34 not in opt_data:
             opt_data[34] = int(input_data["nozzle_temp"])
-            
+
+        # material_class is required; default to FFF (0 = filament)
+        if 8 not in opt_data:
+            opt_data[8] = 0
+
         return opt_data
 
     def encode(self, opt_data):
@@ -353,14 +378,17 @@ class OPTEncoder:
         main_encoder.encode(opt_data)
         main_data = bytes(main_encoder.data)
 
-        # 2. Aux Region: empty CBOR map (for dynamic fields like consumed weight)
-        aux_data = bytes([0xA0])
+        # 2. Aux Region: empty CBOR indefinite map (BF FF = 2 bytes)
+        aux_enc = CBOREncoder()
+        aux_enc.encode({})
+        aux_data = bytes(aux_enc.data)
 
-        # 3. Meta Region: CBOR map {0: MAIN_OFF, 2: AUX_OFF}
-        # {0: 6, 2: 234} encodes to A2 00 06 02 18 EA = exactly 6 bytes,
-        # so MAIN_OFF=6 is self-consistent (meta ends exactly where main begins).
-        MAIN_OFF = 6
-        AUX_OFF = 234
+        # 3. Meta Region: CBOR indefinite map {0: MAIN_OFF, 2: AUX_OFF}
+        # With indefinite encoding {0: 7, 2: 234} = BF 00 07 02 18 EA FF = 7 bytes,
+        # so MAIN_OFF=7 is self-consistent (meta ends exactly where main begins).
+        # Aux region is aligned to a 4-byte page boundary for NTAG writes.
+        MAIN_OFF = 7
+        AUX_OFF = 236  # 4-byte aligned: meta(7)+main_max(229) → nearest multiple of 4
         meta_encoder = CBOREncoder()
         meta_encoder.encode({0: MAIN_OFF, 2: AUX_OFF})
         meta_data = bytes(meta_encoder.data)
