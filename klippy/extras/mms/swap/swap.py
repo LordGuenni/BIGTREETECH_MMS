@@ -354,7 +354,8 @@ class MMSSwap:
                 f"{log_prefix} safety checks failed")
             return False
 
-        if self.skip_same_slot and slot_num_from == slot_num_to:
+        if self.skip_same_slot and slot_num_from == slot_num_to \
+            and self.mms_charge.get_charged_slot() == slot_num_to:
             self.log_info(
                 f"target slot[{slot_num_to}] is already current, skip swap")
             self._exec_custom_macro(self.custom_after, "after")
