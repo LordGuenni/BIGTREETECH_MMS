@@ -58,6 +58,8 @@ class MmsServer:
 
         self.nb_gates = None             # Set during initialization to the size of the MMS or 1 if standalone
         self.cache_lock = asyncio.Lock() # Lock to serialize a async calls
+        self.spoolman_has_extras = False
+        self.printer_hostname = self.printer_info["hostname"]
 
         # Spoolman filament info retrieval functionality and update reporting
         if self.spoolman:
@@ -104,9 +106,6 @@ class MmsServer:
         if self.spoolman is None:
             logging.warning("Spoolman not available. Spoolman remote methods not available")
 
-        # Get current printer hostname
-        self.printer_hostname = self.printer_info["hostname"]
-        self.spoolman_has_extras = False
         if self.spoolman:
             asyncio.create_task(self._init_spoolman(retry=3)) # Spoolman may start up after us so retry a few times
         else:
