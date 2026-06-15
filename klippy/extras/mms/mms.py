@@ -273,7 +273,13 @@ class MMS:
         # Try to sync data
         try:
             if self._is_connected:
-                # Spoolman specific sync
+                # Step 1: Basic lane data pull (Restore state from Moonraker DB)
+                if self._sync_retry_count == 1:
+                    webhooks = printer_adapter.get_obj("webhooks")
+                    webhooks.call_remote_method("moonraker_pull_lane_data")
+                    return eventtime + 2.0 # Wait for commands to be processed
+
+                # Step 2: Spoolman specific sync
                 if self.spoolman_support == "pull":
                     self._moonraker_pull_gate_map()
                 elif self.spoolman_support == "push":
@@ -281,10 +287,6 @@ class MMS:
                 elif self.spoolman_support == "readonly":
                     webhooks = printer_adapter.get_obj("webhooks")
                     webhooks.call_remote_method("spoolman_refresh")
-
-                # Basic lane data pull
-                webhooks = printer_adapter.get_obj("webhooks")
-                webhooks.call_remote_method("moonraker_pull_lane_data")
 
                 self.log_info(f"Moonraker/Spoolman sync successful on attempt {self._sync_retry_count}")
                 self._moonraker_sync_lane_data()
@@ -1203,6 +1205,8 @@ class MMS:
 
     def notify_lane_data_changed(self, slot_nums=None):
         self._moonraker_push_lane_data(slot_nums=slot_nums)
+        if self.spoolman_support == "push":
+            self._moonraker_push_gate_map()
 
     def log_status(self, silent=True):
         # Log stepper status if needed
