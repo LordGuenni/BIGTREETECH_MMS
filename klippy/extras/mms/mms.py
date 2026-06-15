@@ -1171,6 +1171,8 @@ class MMS:
             spool_id = mms_slot.meta.spool_id
             if spool_id is not None and spool_id > 0:
                 gate_ids.append((mms_slot.get_num(), spool_id))
+            else:
+                gate_ids.append((mms_slot.get_num(), -1))
         
         try:
             webhooks = printer_adapter.get_obj("webhooks")
