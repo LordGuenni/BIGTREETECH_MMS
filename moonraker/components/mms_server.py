@@ -292,8 +292,20 @@ class MmsServer:
             reponse = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/spool')
             for spool_info in reponse.json():
                 spool_id = spool_info['id']
-                printer_name = json.loads(spool_info['extra'].get(MMS_NAME_FIELD, "\"\"")).strip('"')
-                mms_gate = int(spool_info['extra'].get(MMS_GATE_FIELD, -1))
+                
+                # Use native types, fallback to string cleaning if legacy data exists
+                raw_printer = spool_info['extra'].get(MMS_NAME_FIELD, "")
+                if isinstance(raw_printer, str):
+                    printer_name = raw_printer.strip('"')
+                else:
+                    printer_name = str(raw_printer)
+                    
+                raw_gate = spool_info['extra'].get(MMS_GATE_FIELD, -1)
+                try:
+                    mms_gate = int(raw_gate) if isinstance(raw_gate, (int, str)) else -1
+                except ValueError:
+                    mms_gate = -1
+
                 filament_attr = self._get_filament_attr(spool_info)
                 self.spool_location[spool_id] = (printer_name, mms_gate, filament_attr)
 
@@ -356,7 +368,7 @@ class MmsServer:
 
         if not silent:
             logging.info(f"Setting spool {spool_id} for printer {printer} @ gate {gate}")
-        data = {'extra': {MMS_NAME_FIELD: json.dumps(f"{printer}"), MMS_GATE_FIELD: json.dumps(gate)}}
+        data = {'extra': {MMS_NAME_FIELD: str(printer), MMS_GATE_FIELD: int(gate)}}
         if self.update_location:
             data['location'] = f"{printer} @ MMS Gate:{gate}"
         response = await self.http_client.request(
@@ -370,7 +382,9 @@ class MmsServer:
             return False
         elif response.has_error():
             err_msg = self.spoolman._get_response_error(response)
-            logging.error(f"Attempt to set spool failed: {err_msg}")
+            status = response.status_code
+            text = response.body.decode('utf-8', errors='ignore') if response.body else ""
+            logging.error(f"Attempt to set spool failed: {err_msg}. HTTP {status}. Body: {text}. Request Data: {data}")
             await self._log_n_send(f"Failed to set spool {spool_id} for printer {printer}. Look at moonraker.log for more details.", error=True, silent=False)
             return False
         return True
@@ -380,7 +394,7 @@ class MmsServer:
 
         if not silent:
             logging.info(f"Unsetting gate map on spool id {spool_id}")
-        data = {'extra': {MMS_NAME_FIELD: json.dumps(""), MMS_GATE_FIELD: json.dumps(-1)}}
+        data = {'extra': {MMS_NAME_FIELD: "", MMS_GATE_FIELD: -1}}
         if self.update_location:
             data['location'] = ""
         response = await self.http_client.request(
@@ -394,7 +408,9 @@ class MmsServer:
             return False
         elif response.has_error():
             err_msg = self.spoolman._get_response_error(response)
-            logging.error(f"Attempt to unset spool failed: {err_msg}")
+            status = response.status_code
+            text = response.body.decode('utf-8', errors='ignore') if response.body else ""
+            logging.error(f"Attempt to unset spool failed: {err_msg}. HTTP {status}. Body: {text}. Request Data: {data}")
             await self._log_n_send(f"Failed to unset spool {spool_id}. Look at moonraker.log for more details", error=True, silent=False)
             return False
         return True
