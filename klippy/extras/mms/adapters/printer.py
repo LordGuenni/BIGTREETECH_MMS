@@ -87,6 +87,10 @@ class PrinterAdapter(BaseAdapter):
         # Most likely return "/home/.../printer_data/config/printer.cfg"
         return self.get_start_args().get("config_file")
 
+    def get_hostname(self):
+        import socket
+        return self.get_start_args().get("hostname", socket.gethostname())
+
     def is_shutdown(self):
         # category:["ready", "startup", "shutdown", "error"]
         # state_msg, category = self.printer.get_state_message()

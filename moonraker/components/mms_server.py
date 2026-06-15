@@ -68,6 +68,7 @@ class MmsServer:
             self.server.register_remote_method("spoolman_clear_spools_for_printer", self.clear_spools_for_printer)
             self.server.register_remote_method("spoolman_set_spool_gate", self.set_spool_gate)
             self.server.register_remote_method("spoolman_unset_spool_gate", self.unset_spool_gate)
+            self.server.register_remote_method("spoolman_set_active_spool", self.set_active_spool)
             self.server.register_remote_method("spoolman_get_spool_info", self.display_spool_info)
             self.server.register_remote_method("spoolman_display_spool_location", self.display_spool_location)
             self.server.register_remote_method("spoolman_write_to_rfid", self.write_to_rfid)
@@ -630,6 +631,13 @@ class MmsServer:
                 gate_ids = [(gate, spool_id) for gate, spool_id in updated_gate_ids.items()]
                 return await self._send_gate_map_update(gate_ids, replace=True, silent=silent)
             return True
+
+    async def set_active_spool(self, spool_id: int | None = None):
+        if self.spoolman is None:
+            return
+        logging.info(f"MMS server: Setting active spool to {spool_id}")
+        await self.database.insert_item(DB_NAMESPACE, ACTIVE_SPOOL_KEY, spool_id)
+        self.server.send_event("spoolman:active_spool_changed", {"spool_id": spool_id})
 
     async def write_to_rfid(self, slot_num: int, spool_id: int, align: int = 1):
         if not await self._check_init_spoolman(): return
