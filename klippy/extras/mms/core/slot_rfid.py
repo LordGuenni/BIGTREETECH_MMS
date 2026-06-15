@@ -155,6 +155,23 @@ class SlotRFID:
         success = self.mms_rfid.write_ntag(data)
         result = "success" if success else "failed"
         self.log_info(f"SLOT[{self.slot_num}] RFID write {result}")
+        
+        if success:
+            import json
+            try:
+                # data is expected to be a JSON string here
+                parsed_data = json.loads(data) if isinstance(data, str) else data
+                self.tag_data = parsed_data
+                self.tag_color = parsed_data.get("color_code", None)
+                if self.tag_color:
+                    if not self.tag_color.startswith("#"):
+                        self.tag_color = f"#{self.tag_color}"
+                # Apply the written data immediately to the slot map
+                self.log_info(f"SLOT[{self.slot_num}] applying written data to local map")
+                self._apply_tag_data()
+            except Exception as e:
+                self.log_warning(f"Failed to parse written data for local sync: {e}")
+                
         return success
 
     # ---- Detect ----
