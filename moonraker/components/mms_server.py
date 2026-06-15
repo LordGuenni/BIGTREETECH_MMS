@@ -633,13 +633,15 @@ class MmsServer:
 
     async def write_to_rfid(self, slot_num: int, spool_id: int, align: int = 1):
         if not await self._check_init_spoolman(): return
-        
+
         # Fetch spool info from Spoolman
-        attr = await self._fetch_spool_info(spool_id)
-        if not attr:
+        spool_info = await self._fetch_spool_info(spool_id)
+        if not spool_info:
             await self._log_n_send(f"Spool id {spool_id} not found, cannot write to RFID", error=True)
             return
-            
+
+        attr = self._get_filament_attr(spool_info)
+
         # Map Spoolman attributes to MMS RFID JSON format
         # This aligns with Klipper's slot_rfid.py expected format (BTT format)
         rfid_data = {
@@ -647,10 +649,15 @@ class MmsServer:
             "filament_manufacturer": attr.get("vendor", ""),
             "filament_material_type": attr.get("material", ""),
             "color_code": attr.get("color", "").strip("#"),
-            "color_name_a": attr.get("color_name", ""),
+            "color_name_a": attr.get("name", ""),
             "filament_type_detailed": attr.get("name", "")
         }
-        
+
+        if attr.get("temp"):
+            rfid_data["nozzle_temp"] = attr.get("temp")
+        if attr.get("bed_temp"):
+            rfid_data["bed_temperature"] = attr.get("bed_temp")
+
         # Build Klipper Command
         import json
         data_str = json.dumps(rfid_data)
