@@ -665,7 +665,12 @@ class MmsServer:
         # We don't pass SPOOLID again to avoid an infinite loop
         cmd = f"MMS_RFID_WRITE SLOT={slot_num} ALIGN={align} DATA='{data_str}'"
         
-        await self._log_n_send(f"Writing Spool {spool_id} to RFID on Slot {slot_num}")
+        log_msg = f"Writing Spool {spool_id} to RFID on Slot {slot_num}: "
+        log_msg += f"{rfid_data.get('filament_manufacturer', 'Unknown')} "
+        log_msg += f"{rfid_data.get('filament_material_type', 'Unknown')} "
+        log_msg += f"({rfid_data.get('color_code', 'NoColor')})"
+        
+        await self._log_n_send(log_msg)
         await self.klippy_apis.run_gcode(cmd)
 
     async def display_spool_info(self, spool_id: int | None = None):
