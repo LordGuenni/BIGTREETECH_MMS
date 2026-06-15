@@ -201,14 +201,14 @@ class SlotRFID:
             )
 
             self.tag_uid = data
+            # Start read phase regardless
+            self.rfid_read_begin()
+
             # Make stop robust: even if it fails, try to start reading
             try:
                 self.mms_delivery.mms_stop(self.slot_num)
             except Exception:
                 self.log_info_s(f"slot[{self.slot_num}] mms_stop error (ignored): {traceback.format_exc()}")
-            
-            # Start read phase regardless
-            self.rfid_read_begin()
 
         elif self._detect_is_timeout():
             self.rfid_detect_end()
@@ -344,7 +344,7 @@ class SlotRFID:
                             self.tag_color = mapped.get("color_code")
                             self._apply_tag_data()
                     else:
-                        self.log_error(f"slot[{self.slot_num}] Could not decode OpenPrintTag payload")
+                        self.log_info(f"slot[{self.slot_num}] Decoding Failed / Blank TAG Detected")
                 
                 else:
                     self.log_warning(f"slot[{self.slot_num}] Unknown tag data format: {data[:100]}...")
@@ -374,7 +374,7 @@ class SlotRFID:
                     self.tag_color = mapped.get("color_code")
                     self._apply_tag_data()
             else:
-                self.log_error(f"slot[{self.slot_num}] Could not decode OpenPrintTag payload")
+                self.log_info(f"slot[{self.slot_num}] Decoding Failed / Blank TAG Detected")
         except Exception as e:
             self.log_error(f"slot[{self.slot_num}] OpenPrintTag read error: {e}")
 

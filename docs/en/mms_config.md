@@ -99,6 +99,27 @@ MMS_SLOT_MAP SLOT=0 NOZZLE_TEMP=240 BED_TEMP=80
 MMS_SLOT_MAP RESET=1
 ```
 
+#### RFID Commands
+
+Manage RFID tags for filament identification.
+
+*   **MMS_RFID_READ**: Reads RFID tag data from a specific slot.
+    *   `SLOT`: Slot number (e.g., `SLOT=0`).
+    *   `SWITCH`: `1` to start reading, `0` to stop.
+*   **MMS_RFID_WRITE**: Writes metadata to an RFID tag.
+    *   `SLOT`: Slot number.
+    *   `DATA`: JSON string containing filament metadata.
+    *   `ALIGN`: (Default: 1) If 1, automatically aligns the tag with the antenna before writing.
+*   **MMS_RFID_TRUNCATE**: Clears cached RFID data for a slot.
+    *   `SLOT`: Slot number.
+*   **MMS_RFID_RESET**: Resets RFID readers and internal states.
+
+**MMS_RFID_WRITE Example:**
+```
+MMS_RFID_WRITE SLOT=0 DATA='{"brand_name": "BTT", "material_type": "PLA", "primary_color": "FF0000"}'
+```
+See `config/bigtreetech-mms/rfid/rfid_write.json` for all supported fields.
+
 ### base/mms-cut.cfg
 
 #### [mms cut]

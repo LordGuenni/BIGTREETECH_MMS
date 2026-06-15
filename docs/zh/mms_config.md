@@ -65,6 +65,40 @@ log 日志相关配置, 默认配置遵循 klipper 规范, 请不要修改此配
 
 此配置包含了 ViViD 的宏命令配置。
 
+#### MMS Slot Map (MMS_SLOT_MAP)
+
+设置或显示每个料槽的耗材元数据（Moonraker lane data）。SLOT/SLOTS 是首选参数（为了兼容性也支持 GATE/GATES）。可选的温度字段包括 NOZZLE_TEMP 和 BED_TEMP。
+
+**示例:**
+```
+MMS_SLOT_MAP
+MMS_SLOT_MAP SLOT=0 MATERIAL='PETG' COLOR='FF0000' NAME='PETG HF Black Red' VENDOR='Bambu'
+MMS_SLOT_MAP SLOTS=0,1,2,3 MATERIAL='PETG'
+MMS_SLOT_MAP SLOT=0 NOZZLE_TEMP=240 BED_TEMP=80
+MMS_SLOT_MAP RESET=1
+```
+
+#### RFID 相关命令
+
+管理用于耗材识别的 RFID 标签。
+
+*   **MMS_RFID_READ**: 读取指定料槽的 RFID 标签数据。
+    *   `SLOT`: 料槽编号（例如 `SLOT=0`）。
+    *   `SWITCH`: `1` 开始读取，`0` 停止。
+*   **MMS_RFID_WRITE**: 向 RFID 标签写入元数据。
+    *   `SLOT`: 料槽编号。
+    *   `DATA`: 包含耗材元数据的 JSON 字符串。
+    *   `ALIGN`: （默认：1）如果为 1，在写入前自动将标签与天线对齐。
+*   **MMS_RFID_TRUNCATE**: 清除料槽的缓存 RFID 数据。
+    *   `SLOT`: 料槽编号。
+*   **MMS_RFID_RESET**: 重置 RFID 读取器和内部状态。
+
+**MMS_RFID_WRITE 示例:**
+```
+MMS_RFID_WRITE SLOT=0 DATA='{"brand_name": "BTT", "material_type": "PLA", "primary_color": "FF0000"}'
+```
+所有支持的字段请参考 `config/bigtreetech-mms/rfid/rfid_write.json`。
+
 ### base/mms-cut.cfg
 
 #### [mms cut]
