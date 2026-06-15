@@ -797,6 +797,8 @@ class MmsServer:
                     if data.get('color'): parts.append(f"COLOR='{data['color']}'")
                     if data.get('vendor_name'): parts.append(f"VENDOR='{data['vendor_name']}'")
                     if data.get('name'): parts.append(f"NAME='{data['name']}'")
+                    if data.get('spool_id'): parts.append(f"SPOOLID={data['spool_id']}")
+                    if data.get('filament_id'): parts.append(f"FILAMENT_ID='{data['filament_id']}'")
                     
                     # Handle temps (avoid 0.0 or None)
                     bt = data.get('bed_temp')
