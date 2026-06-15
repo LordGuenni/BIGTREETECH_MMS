@@ -83,6 +83,8 @@ class MmsServer:
 
         # Options
         self.update_location = self.config.getboolean("update_spoolman_location", True)
+        self.enable_file_preprocessor = self.config.getboolean("enable_file_preprocessor", True)
+        self.enable_toolchange_next_pos = self.config.getboolean("enable_toolchange_next_pos", True)
 
     async def _get_spoolman_version(self) -> tuple[int, int, int] | None:
         response = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/info')

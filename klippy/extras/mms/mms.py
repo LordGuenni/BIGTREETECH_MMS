@@ -76,7 +76,6 @@ class PrinterMMSConfig(PrinterConfig):
 
     # Spoolman Support: off | readonly | push | pull
     spoolman_support: str = "off"
-    pending_spool_id_timeout: float = 20.0
 
 
 class MMS:
