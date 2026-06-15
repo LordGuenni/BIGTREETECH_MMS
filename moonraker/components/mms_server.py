@@ -492,7 +492,7 @@ class MmsServer:
                         self.server.send_event("spoolman:set_spool_gate", {"spool_id": sid, "printer": self.printer_hostname, "gate": gate})
                         await self._log_n_send(f"Spool {sid} assigned to printer {self.printer_hostname} @ gate {gate} in Spoolman db", silent=silent)
 
-            return await self._send_gate_map_update(gate_ids, silent=silent)
+            return True
 
     async def pull_gate_map(self, silent=False) -> bool:
         if not await self._check_init_spoolman(): return

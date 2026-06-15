@@ -387,6 +387,8 @@ class MMS:
 ("MMS_RFID_TRUNCATE", self.cmd_MMS_RFID_TRUNCATE),
 ("MMS_RFID_RESET", self.cmd_MMS_RFID_RESET),
 
+("MMS_LOG", self.cmd_MMS_LOG),
+
 # Spoolman Support
 ("MMS_SPOOLMAN", self.cmd_MMS_SPOOLMAN),
 
