@@ -356,7 +356,7 @@ class MmsServer:
 
         if not silent:
             logging.info(f"Setting spool {spool_id} for printer {printer} @ gate {gate}")
-        data = {'extra': {MMS_NAME_FIELD: json.dumps(f"{printer}"), MMS_GATE_FIELD: json.dumps(gate)}}
+        data = {'extra': {MMS_NAME_FIELD: str(printer), MMS_GATE_FIELD: int(gate)}}
         if self.update_location:
             data['location'] = f"{printer} @ MMS Gate:{gate}"
         response = await self.http_client.request(
@@ -380,7 +380,7 @@ class MmsServer:
 
         if not silent:
             logging.info(f"Unsetting gate map on spool id {spool_id}")
-        data = {'extra': {MMS_NAME_FIELD: json.dumps(""), MMS_GATE_FIELD: json.dumps(-1)}}
+        data = {'extra': {MMS_NAME_FIELD: "", MMS_GATE_FIELD: -1}}
         if self.update_location:
             data['location'] = ""
         response = await self.http_client.request(
