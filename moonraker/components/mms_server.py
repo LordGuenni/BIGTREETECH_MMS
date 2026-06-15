@@ -368,7 +368,7 @@ class MmsServer:
 
         if not silent:
             logging.info(f"Setting spool {spool_id} for printer {printer} @ gate {gate}")
-        data = {'extra': {MMS_NAME_FIELD: str(printer), MMS_GATE_FIELD: int(gate)}}
+        data = {'extra': {MMS_NAME_FIELD: json.dumps(f"{printer}"), MMS_GATE_FIELD: json.dumps(gate)}}
         if self.update_location:
             data['location'] = f"{printer} @ MMS Gate:{gate}"
         response = await self.http_client.request(
@@ -382,9 +382,7 @@ class MmsServer:
             return False
         elif response.has_error():
             err_msg = self.spoolman._get_response_error(response)
-            status = response.status_code
-            text = response.body.decode('utf-8', errors='ignore') if response.body else ""
-            logging.error(f"Attempt to set spool failed: {err_msg}. HTTP {status}. Body: {text}. Request Data: {data}")
+            logging.error(f"Attempt to set spool failed: {err_msg}")
             await self._log_n_send(f"Failed to set spool {spool_id} for printer {printer}. Look at moonraker.log for more details.", error=True, silent=False)
             return False
         return True
@@ -394,7 +392,7 @@ class MmsServer:
 
         if not silent:
             logging.info(f"Unsetting gate map on spool id {spool_id}")
-        data = {'extra': {MMS_NAME_FIELD: "", MMS_GATE_FIELD: -1}}
+        data = {'extra': {MMS_NAME_FIELD: json.dumps(""), MMS_GATE_FIELD: json.dumps(-1)}}
         if self.update_location:
             data['location'] = ""
         response = await self.http_client.request(
@@ -408,9 +406,7 @@ class MmsServer:
             return False
         elif response.has_error():
             err_msg = self.spoolman._get_response_error(response)
-            status = response.status_code
-            text = response.body.decode('utf-8', errors='ignore') if response.body else ""
-            logging.error(f"Attempt to unset spool failed: {err_msg}. HTTP {status}. Body: {text}. Request Data: {data}")
+            logging.error(f"Attempt to unset spool failed: {err_msg}")
             await self._log_n_send(f"Failed to unset spool {spool_id}. Look at moonraker.log for more details", error=True, silent=False)
             return False
         return True
