@@ -78,13 +78,13 @@ class MmsServer:
         self.server.register_remote_method("moonraker_pull_lane_data", self.pull_lane_data)
         self.server.register_remote_method("moonraker_cleanup_lane_data", self.cleanup_lane_data)
 
-        # Replace file_manager/metadata with this file
-        self.setup_placeholder_processor(config)
-
         # Options
         self.update_location = self.config.getboolean("update_spoolman_location", True)
         self.enable_file_preprocessor = self.config.getboolean("enable_file_preprocessor", True)
         self.enable_toolchange_next_pos = self.config.getboolean("enable_toolchange_next_pos", True)
+
+        # Replace file_manager/metadata with this file
+        self.setup_placeholder_processor(config)
 
     async def _get_spoolman_version(self) -> tuple[int, int, int] | None:
         response = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/info')
@@ -831,9 +831,9 @@ class MmsServer:
             logging.error(f"Error cleaning up lane data: {e}")
 
     def setup_placeholder_processor(self, config):
-        args = " -m" if config.getboolean("enable_file_preprocessor", True) else ""
-        args += " -n" if config.getboolean("enable_toolchange_next_pos", True) else ""
-        
+        args = " -m" if self.enable_file_preprocessor else ""
+        args += " -n" if self.enable_toolchange_next_pos else ""
+
         # Link the custom MMS preprocessor script to Moonraker's file_manager
         script_path = os.path.join(os.path.dirname(__file__), '../../scripts/mms_preprocessor.py')
         if os.path.exists(script_path):
