@@ -97,6 +97,34 @@ MMS_SLOT_MAP SLOT=0 MATERIAL='PETG' COLOR='FF0000' NAME='PETG HF Black Red' VEND
 MMS_SLOT_MAP SLOTS=0,1,2,3 MATERIAL='PETG'
 MMS_SLOT_MAP SLOT=0 NOZZLE_TEMP=240 BED_TEMP=80
 MMS_SLOT_MAP RESET=1
+MMS_SLOT_MAP SLOT=0 SPOOLID=123
+```
+
+#### Spoolman Support (MMS_SPOOLMAN)
+
+MMS fully integrates with Spoolman to track filament usage and attributes.
+
+**Configuration in [mms] section:**
+* `spoolman_support`: string (`off`, `readonly`, `push`, `pull`)
+    * `off`: No Spoolman support.
+    * `readonly`: Retrieves attributes but never modifies Spoolman DB.
+    * `push`: Local gate map is source of truth, pushed to Spoolman.
+    * `pull`: Spoolman is source of truth, pulled to local map.
+
+**MMS_SPOOLMAN Command:**
+* `GATE` / `SLOT`: Target gate number.
+* `SPOOLID`: Set spool ID for the gate (use -1 to unset).
+* `SYNC=1`: Force sync with Moonraker (direction based on `spoolman_support`).
+* `REFRESH=1`: Force Moonraker to reload Spoolman cache.
+* `FIX=1`: (Use with REFRESH) Attempt to fix database inconsistencies.
+* `CLEAR=1`: Clear all spool assignments for this printer in Spoolman.
+* `SPOOLINFO=<id>`: Display detailed info about a spool.
+
+**Examples:**
+```
+MMS_SPOOLMAN GATE=0 SPOOLID=5 SYNC=1
+MMS_SPOOLMAN REFRESH=1 FIX=1
+MMS_SPOOLMAN SPOOLINFO=1
 ```
 
 #### RFID Commands

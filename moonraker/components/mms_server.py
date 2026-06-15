@@ -68,8 +68,10 @@ class MmsServer:
             self.server.register_remote_method("spoolman_clear_spools_for_printer", self.clear_spools_for_printer)
             self.server.register_remote_method("spoolman_set_spool_gate", self.set_spool_gate)
             self.server.register_remote_method("spoolman_unset_spool_gate", self.unset_spool_gate)
+            self.server.register_remote_method("spoolman_set_active_spool", self.set_active_spool)
             self.server.register_remote_method("spoolman_get_spool_info", self.display_spool_info)
             self.server.register_remote_method("spoolman_display_spool_location", self.display_spool_location)
+            self.server.register_remote_method("spoolman_write_to_rfid", self.write_to_rfid)
 
         # Moonraker lane data push for slicer integration
         self.server.register_remote_method("moonraker_push_lane_data", self.push_lane_data)
@@ -398,21 +400,36 @@ class MmsServer:
 
     async def _send_gate_map_update(self, gate_ids, replace=False, silent=False) -> bool:
         if self._mms_backend_enabled():
-            gate_dict = {
-                gate: (
-                    {'spool_id': -1} if spool_id < 0 else
-                    self.spool_location.get(spool_id)[2].copy()
-                    if self.spool_location.get(spool_id)
-                    else logging.error(f"Spool id {spool_id} requested but not found in spoolman")
-                )
-                for gate, spool_id in gate_ids
-            }
-            try:
-                # Assuming MMS might not have a direct equivalent to MMU_GATE_MAP, we might just log or pass
-                await self._log_n_send(f"MMS Spoolman Gate Map Update: {gate_dict}", silent=silent)
-            except Exception as e:
-                await self._log_n_send(f"Exception running MMS Gate Map update: {str(e)}", error=True, silent=silent)
-                return False
+            for gate, spool_id in gate_ids:
+                if spool_id is None or spool_id < 0:
+                    await self.klippy_apis.run_gcode(f"MMS_SLOT_MAP SLOT={gate} RESET=1 QUIET=1 SYNC=0")
+                    continue
+                
+                # Get from cache or fetch
+                attr = None
+                if spool_id in self.spool_location:
+                    attr = self.spool_location[spool_id][2]
+                
+                if not attr:
+                    attr = await self._fetch_spool_info(spool_id)
+                
+                if not attr:
+                    continue
+
+                vendor = attr.get('vendor', '')
+                material = attr.get('material', '')
+                color = attr.get('color', '').strip('#')
+                name = attr.get('name', '')
+                
+                # Construct MMS_SLOT_MAP command
+                # Use SYNC=0 to avoid loop back to moonraker
+                cmd = f"MMS_SLOT_MAP SLOT={gate} SPOOLID={spool_id} QUIET=1 SYNC=0"
+                if vendor: cmd += f" VENDOR='{vendor}'"
+                if material: cmd += f" MATERIAL='{material}'"
+                if color: cmd += f" COLOR='{color}'"
+                if name: cmd += f" NAME='{name}'"
+                
+                await self.klippy_apis.run_gcode(cmd)
         return True
 
     async def refresh_cache(self, fix=False, silent=False) -> bool:
@@ -600,6 +617,52 @@ class MmsServer:
                 gate_ids = [(gate, spool_id) for gate, spool_id in updated_gate_ids.items()]
                 return await self._send_gate_map_update(gate_ids, replace=True, silent=silent)
             return True
+
+    async def set_active_spool(self, spool_id: int | None = None) -> bool:
+        if spool_id is None:
+            await self.spoolman.database.delete_item(DB_NAMESPACE, ACTIVE_SPOOL_KEY)
+            await self._log_n_send("Active spool cleared", silent=False)
+            return True
+        
+        # Check if spool exists
+        spool_info = await self._fetch_spool_info(spool_id)
+        if not spool_info:
+            await self._log_n_send(f"Spool id {spool_id} not found", error=True)
+            return False
+
+        await self.spoolman.database.insert_item(DB_NAMESPACE, ACTIVE_SPOOL_KEY, spool_id)
+        await self._log_n_send(f"Active spool set to {spool_id}", silent=False)
+        return True
+
+    async def write_to_rfid(self, slot_num: int, spool_id: int, align: int = 1):
+        if not await self._check_init_spoolman(): return
+        
+        # Fetch spool info from Spoolman
+        attr = await self._fetch_spool_info(spool_id)
+        if not attr:
+            await self._log_n_send(f"Spool id {spool_id} not found, cannot write to RFID", error=True)
+            return
+            
+        # Map Spoolman attributes to MMS RFID JSON format
+        # This aligns with Klipper's slot_rfid.py expected format (BTT format)
+        rfid_data = {
+            "spool_id": spool_id,
+            "filament_manufacturer": attr.get("vendor", ""),
+            "filament_material_type": attr.get("material", ""),
+            "color_code": attr.get("color", "").strip("#"),
+            "color_name_a": attr.get("color_name", ""),
+            "filament_type_detailed": attr.get("name", "")
+        }
+        
+        # Build Klipper Command
+        import json
+        data_str = json.dumps(rfid_data)
+        # Re-invoke the Klipper command, but this time with the constructed DATA
+        # We don't pass SPOOLID again to avoid an infinite loop
+        cmd = f"MMS_RFID_WRITE SLOT={slot_num} ALIGN={align} DATA='{data_str}'"
+        
+        await self._log_n_send(f"Writing Spool {spool_id} to RFID on Slot {slot_num}")
+        await self.klippy_apis.run_gcode(cmd)
 
     async def display_spool_info(self, spool_id: int | None = None):
         async with self.cache_lock:

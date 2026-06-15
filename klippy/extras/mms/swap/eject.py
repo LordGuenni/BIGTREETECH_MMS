@@ -540,6 +540,10 @@ class MMSEject:
             res = self._standard_eject()
             self.mms_charge.teardown()
             if res:
+                # Notify Spoolman
+                webhooks = printer_adapter.get_obj("webhooks")
+                webhooks.call_remote_method("spoolman_set_active_spool", spool_id=None)
+
                 self._exec_custom_macro(self.custom_after, "after")
             return res
 
