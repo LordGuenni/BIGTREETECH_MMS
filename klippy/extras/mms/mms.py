@@ -1490,9 +1490,9 @@ class MMS:
 
         if sync:
             if self.spoolman_support == "push":
-                webhooks.call_remote_method("spoolman_push_gate_map")
+                self._moonraker_push_gate_map()
             elif self.spoolman_support == "pull":
-                webhooks.call_remote_method("spoolman_pull_gate_map")
+                self._moonraker_pull_gate_map()
             elif self.spoolman_support == "readonly":
                 webhooks.call_remote_method("spoolman_refresh")
             
