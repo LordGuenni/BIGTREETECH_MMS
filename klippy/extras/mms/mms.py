@@ -74,6 +74,9 @@ class PrinterMMSConfig(PrinterConfig):
     filament_detection_enable: int = 1
     endless_spool_enable: int = 1
 
+    # Spoolman Support: off | readonly | push | pull
+    spoolman_support: str = "off"
+
 
 class MMS:
     def __init__(self, config):
@@ -102,6 +105,9 @@ class MMS:
         # List to store mms_steppers
         self.mms_selectors = []
         self.mms_drives = []
+
+        # Spoolman Support
+        self.spoolman_support = self.p_mms_config.spoolman_support.lower()
 
         # Init components
         self._initialize()
@@ -264,25 +270,34 @@ class MMS:
     def _persistent_moonraker_sync(self, eventtime):
         self._sync_retry_count += 1
         
-        # Try to pull data
-        success = False
+        # Try to sync data
         try:
             if self._is_connected:
-                webhooks = printer_adapter.get_obj("webhooks")
-                webhooks.call_remote_method("moonraker_pull_lane_data")
-                success = True
-        except Exception:
-            success = False
+                # Step 1: Basic lane data pull (Restore state from Moonraker DB)
+                if self._sync_retry_count == 1:
+                    webhooks = printer_adapter.get_obj("webhooks")
+                    webhooks.call_remote_method("moonraker_pull_lane_data")
+                    return eventtime + 2.0 # Wait for commands to be processed
 
-        if success:
-            self.log_info(f"Moonraker lane_data sync successful on attempt {self._sync_retry_count}")
-            self._moonraker_sync_lane_data()
-            return printer_adapter.get_reactor().NEVER
-        
+                # Step 2: Spoolman specific sync
+                if self.spoolman_support == "pull":
+                    self._moonraker_pull_gate_map()
+                elif self.spoolman_support == "push":
+                    self._moonraker_push_gate_map()
+                elif self.spoolman_support == "readonly":
+                    webhooks = printer_adapter.get_obj("webhooks")
+                    webhooks.call_remote_method("spoolman_refresh")
+
+                self.log_info(f"Moonraker/Spoolman sync successful on attempt {self._sync_retry_count}")
+                self._moonraker_sync_lane_data()
+                return printer_adapter.get_reactor().NEVER
+        except Exception as e:
+            self.log_info_s(f"sync attempt {self._sync_retry_count} failed: {e}")
+
         if self._sync_retry_count < 5:
             return eventtime + 2.0
         
-        self.log_warning("Moonraker lane_data sync failed after 5 attempts")
+        self.log_warning("Moonraker/Spoolman sync failed after 5 attempts")
         return printer_adapter.get_reactor().NEVER
 
     def _handle_klippy_shutdown(self):
@@ -368,13 +383,19 @@ class MMS:
             ),
             ("MMS_STATUS_STEPPER", self.cmd_MMS_STATUS_STEPPER),
             ("MMS_SAMPLE_STEPPER", self.cmd_MMS_SAMPLE_STEPPER),
+# RFID Support
+("MMS_RFID_READ", self.cmd_MMS_RFID_READ),
+("MMS_RFID_WRITE", self.cmd_MMS_RFID_WRITE),
+("MMS_RFID_TRUNCATE", self.cmd_MMS_RFID_TRUNCATE),
+("MMS_RFID_RESET", self.cmd_MMS_RFID_RESET),
 
-            # RFID Support
-            ("MMS_RFID_READ", self.cmd_MMS_RFID_READ),
-            ("MMS_RFID_WRITE", self.cmd_MMS_RFID_WRITE),
-            ("MMS_RFID_TRUNCATE", self.cmd_MMS_RFID_TRUNCATE),
-            ("MMS_RFID_RESET", self.cmd_MMS_RFID_RESET),
-            ("MMS_LOG", self.cmd_MMS_LOG),
+("MMS_LOG", self.cmd_MMS_LOG),
+
+# Spoolman Support
+("MMS_SPOOLMAN", self.cmd_MMS_SPOOLMAN),
+
+# Slot Support
+
 
             # SLOT Meta
             ("MMS_SLOT_COLOR", self.cmd_MMS_SLOT_COLOR),
@@ -1146,6 +1167,32 @@ class MMS:
         except Exception as e:
             self.log_info_s(f"failed to push lane data to Moonraker: {e}")
 
+    def _moonraker_push_gate_map(self):
+        if not self._is_connected:
+            return
+        gate_ids = []
+        for mms_slot in self.mms_slots:
+            spool_id = mms_slot.meta.spool_id
+            if spool_id is not None and spool_id > 0:
+                gate_ids.append((mms_slot.get_num(), spool_id))
+            else:
+                gate_ids.append((mms_slot.get_num(), -1))
+        
+        try:
+            webhooks = printer_adapter.get_obj("webhooks")
+            webhooks.call_remote_method("spoolman_push_gate_map", gate_ids=gate_ids)
+        except Exception as e:
+            self.log_info_s(f"failed to push gate map to Moonraker: {e}")
+
+    def _moonraker_pull_gate_map(self):
+        if not self._is_connected:
+            return
+        try:
+            webhooks = printer_adapter.get_obj("webhooks")
+            webhooks.call_remote_method("spoolman_pull_gate_map")
+        except Exception as e:
+            self.log_info_s(f"failed to pull gate map from Moonraker: {e}")
+
     def _moonraker_sync_lane_data(self):
         try:
             webhooks = printer_adapter.get_obj("webhooks")
@@ -1158,6 +1205,8 @@ class MMS:
 
     def notify_lane_data_changed(self, slot_nums=None):
         self._moonraker_push_lane_data(slot_nums=slot_nums)
+        if self.spoolman_support == "push":
+            self._moonraker_push_gate_map()
 
     def log_status(self, silent=True):
         # Log stepper status if needed
@@ -1271,10 +1320,27 @@ class MMS:
         slot_num = gcmd.get_int("SLOT", minval=0)
         data = gcmd.get("DATA", default="{}")
         align = gcmd.get_int("ALIGN", default=1)
+        spool_id = gcmd.get_int("SPOOLID", default=gcmd.get_int("SPOOL_ID", default=None))
+
         if not self.slot_is_available(slot_num):
             return
-        mms_slot = self.get_mms_slot(slot_num)
         
+        mms_slot = self.get_mms_slot(slot_num)
+
+        # If SPOOLID is provided, fetch data from Spoolman via Moonraker first
+        if spool_id is not None and spool_id > 0 and self.spoolman_support != "off":
+            webhooks = printer_adapter.get_obj("webhooks")
+            try:
+                # We need to trigger an update and wait, or use lane_data
+                # But since we can't easily wait for Moonraker response here synchronously,
+                # we tell Moonraker to handle the fetching AND writing via a new remote method
+                webhooks.call_remote_method("spoolman_write_to_rfid", slot_num=slot_num, spool_id=spool_id, align=align)
+                self.log_info(f"Requested Moonraker to fetch SpoolID {spool_id} and write to slot {slot_num} RFID")
+                return
+            except Exception as e:
+                self.log_error(f"Failed to request Spoolman data for RFID write: {e}")
+                return
+
         if align:
             mms_delivery = printer_adapter.get_mms_delivery()
             mms_delivery.deliver_async_task(
@@ -1355,6 +1421,94 @@ class MMS:
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.set_spool_id(spool_id)
         self.notify_lane_data_changed([slot_num])
+
+    def cmd_MMS_SPOOLMAN(self, gcmd):
+        """
+        Usage:
+            MMS_SPOOLMAN
+            MMS_SPOOLMAN GATE=0 SPOOLID=123
+            MMS_SPOOLMAN SYNC=1
+            MMS_SPOOLMAN REFRESH=1
+            MMS_SPOOLMAN CLEAR=1
+            MMS_SPOOLMAN SPOOLINFO=1
+        """
+        if self.spoolman_support == "off":
+            self.log_info("Spoolman support is disabled")
+            return
+
+        gate = gcmd.get_int("GATE", default=gcmd.get_int("SLOT", default=None))
+        spool_id = gcmd.get_int("SPOOLID", default=None)
+        sync = gcmd.get_int("SYNC", default=0)
+        refresh = gcmd.get_int("REFRESH", default=0)
+        fix = gcmd.get_int("FIX", default=0)
+        clear = gcmd.get_int("CLEAR", default=0)
+        spool_info = gcmd.get_int("SPOOLINFO", default=None)
+        quiet = gcmd.get_int("QUIET", default=0)
+
+        webhooks = printer_adapter.get_obj("webhooks")
+
+        if clear:
+            webhooks.call_remote_method("spoolman_clear_spools_for_printer")
+            if not quiet:
+                self.log_info("Requested Spoolman clear for this printer")
+            return
+
+        if refresh:
+            webhooks.call_remote_method("spoolman_refresh", fix=fix)
+            if not quiet:
+                self.log_info(f"Requested Spoolman refresh (fix={fix})")
+            if sync:
+                # Sync will be triggered by refresh completion on Moonraker side usually,
+                # but we can explicitly request it after a short delay if needed.
+                pass
+            return
+
+        if spool_info is not None:
+            webhooks.call_remote_method(
+                "spoolman_get_spool_info",
+                spool_id=spool_info if spool_info > 0 else None
+            )
+            return
+
+        if gate is not None:
+            if spool_id is not None:
+                # Set spool
+                if spool_id > 0:
+                    webhooks.call_remote_method(
+                        "spoolman_set_spool_gate",
+                        spool_id=spool_id, gate=gate, sync=bool(sync)
+                    )
+                else:
+                    # Unset spool
+                    webhooks.call_remote_method(
+                        "spoolman_unset_spool_gate",
+                        gate=gate, sync=bool(sync)
+                    )
+            else:
+                # Just info about gate
+                webhooks.call_remote_method(
+                    "spoolman_display_spool_location",
+                    printer_name=printer_adapter.get_hostname()
+                )
+            return
+
+        if sync:
+            if self.spoolman_support == "push":
+                self._moonraker_push_gate_map()
+            elif self.spoolman_support == "pull":
+                self._moonraker_pull_gate_map()
+            elif self.spoolman_support == "readonly":
+                webhooks.call_remote_method("spoolman_refresh")
+            
+            if not quiet:
+                self.log_info(f"Requested Spoolman sync ({self.spoolman_support})")
+            return
+
+        # Default: list gate assignment
+        webhooks.call_remote_method(
+            "spoolman_display_spool_location",
+            printer_name=printer_adapter.get_hostname()
+        )
 
     def _normalize_slot_map_value(self, value):
         if value is None:
@@ -1486,6 +1640,8 @@ class MMS:
         bed_temp_set,
         nozzle_temp,
         nozzle_temp_set,
+        spool_id,
+        spool_id_set,
         reset,
     ):
         filament_info = dict(mms_slot.meta.filament_info or {})
@@ -1500,6 +1656,8 @@ class MMS:
                 "filament_material_type",
                 "bed_temperature",
                 "nozzle_temp",
+                "spool_id",
+                "filament_id",
             ):
                 if key in filament_info:
                     filament_info.pop(key, None)
@@ -1509,6 +1667,9 @@ class MMS:
                 updated = True
             if mms_slot.meta.filament_material is not None:
                 mms_slot.set_filament_material(None)
+                updated = True
+            if mms_slot.meta.spool_id is not None:
+                mms_slot.set_spool_id(None)
                 updated = True
 
         if vendor_set:
@@ -1536,6 +1697,9 @@ class MMS:
             if material is None:
                 if mms_slot.meta.filament_material is not None:
                     mms_slot.set_filament_material(None)
+                    updated = True
+                if mms_slot.meta.spool_id is not None:
+                    mms_slot.set_spool_id(None)
                     updated = True
                 if "filament_material_type" in filament_info:
                     filament_info.pop("filament_material_type", None)
@@ -1576,6 +1740,16 @@ class MMS:
                 filament_info["nozzle_temp"] = nozzle_temp
                 updated = True
 
+        if spool_id_set:
+            if spool_id is None or spool_id < 0:
+                if mms_slot.meta.spool_id is not None:
+                    mms_slot.set_spool_id(None)
+                    updated = True
+            else:
+                if mms_slot.meta.spool_id != spool_id:
+                    mms_slot.set_spool_id(spool_id)
+                    updated = True
+
         if updated:
             mms_slot.set_filament_info(filament_info)
 
@@ -1613,6 +1787,7 @@ class MMS:
         color_raw = gcmd.get("COLOR", default=None)
         bed_temp_raw = gcmd.get("BED_TEMP", default=None)
         nozzle_temp_raw = gcmd.get("NOZZLE_TEMP", default=None)
+        spool_id_raw = gcmd.get_int("SPOOLID", default=gcmd.get_int("SPOOL_ID", default=None))
 
         vendor_set = vendor_raw is not None
         name_set = name_raw is not None
@@ -1620,6 +1795,7 @@ class MMS:
         color_set = color_raw is not None
         bed_temp_set = bed_temp_raw is not None
         nozzle_temp_set = nozzle_temp_raw is not None
+        spool_id_set = spool_id_raw is not None
 
         vendor = self._normalize_slot_map_value(vendor_raw)
         name = self._normalize_slot_map_value(name_raw)
@@ -1654,6 +1830,7 @@ class MMS:
                 color_set,
                 bed_temp_set,
                 nozzle_temp_set,
+                spool_id_set,
                 reset,
             ]
         )
@@ -1693,6 +1870,8 @@ class MMS:
                 bed_temp_set,
                 nozzle_temp,
                 nozzle_temp_set,
+                spool_id_raw,
+                spool_id_set,
                 reset,
             )
             if updated:

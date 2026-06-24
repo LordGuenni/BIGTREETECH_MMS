@@ -58,6 +58,8 @@ class MmsServer:
 
         self.nb_gates = None             # Set during initialization to the size of the MMS or 1 if standalone
         self.cache_lock = asyncio.Lock() # Lock to serialize a async calls
+        self.spoolman_has_extras = False
+        self.printer_hostname = self.printer_info["hostname"]
 
         # Spoolman filament info retrieval functionality and update reporting
         if self.spoolman:
@@ -70,17 +72,20 @@ class MmsServer:
             self.server.register_remote_method("spoolman_unset_spool_gate", self.unset_spool_gate)
             self.server.register_remote_method("spoolman_get_spool_info", self.display_spool_info)
             self.server.register_remote_method("spoolman_display_spool_location", self.display_spool_location)
+            self.server.register_remote_method("spoolman_write_to_rfid", self.write_to_rfid)
 
         # Moonraker lane data push for slicer integration
         self.server.register_remote_method("moonraker_push_lane_data", self.push_lane_data)
         self.server.register_remote_method("moonraker_pull_lane_data", self.pull_lane_data)
         self.server.register_remote_method("moonraker_cleanup_lane_data", self.cleanup_lane_data)
 
-        # Replace file_manager/metadata with this file
-        self.setup_placeholder_processor(config)
-
         # Options
         self.update_location = self.config.getboolean("update_spoolman_location", True)
+        self.enable_file_preprocessor = self.config.getboolean("enable_file_preprocessor", True)
+        self.enable_toolchange_next_pos = self.config.getboolean("enable_toolchange_next_pos", True)
+
+        # Replace file_manager/metadata with this file
+        self.setup_placeholder_processor(config)
 
     async def _get_spoolman_version(self) -> tuple[int, int, int] | None:
         response = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/info')
@@ -100,9 +105,6 @@ class MmsServer:
         if self.spoolman is None:
             logging.warning("Spoolman not available. Spoolman remote methods not available")
 
-        # Get current printer hostname
-        self.printer_hostname = self.printer_info["hostname"]
-        self.spoolman_has_extras = False
         if self.spoolman:
             asyncio.create_task(self._init_spoolman(retry=3)) # Spoolman may start up after us so retry a few times
         else:
@@ -289,8 +291,20 @@ class MmsServer:
             reponse = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/spool')
             for spool_info in reponse.json():
                 spool_id = spool_info['id']
-                printer_name = json.loads(spool_info['extra'].get(MMS_NAME_FIELD, "\"\"")).strip('"')
-                mms_gate = int(spool_info['extra'].get(MMS_GATE_FIELD, -1))
+                
+                # Use native types, fallback to string cleaning if legacy data exists
+                raw_printer = spool_info['extra'].get(MMS_NAME_FIELD, "")
+                if isinstance(raw_printer, str):
+                    printer_name = raw_printer.strip('"')
+                else:
+                    printer_name = str(raw_printer)
+                    
+                raw_gate = spool_info['extra'].get(MMS_GATE_FIELD, -1)
+                try:
+                    mms_gate = int(raw_gate) if isinstance(raw_gate, (int, str)) else -1
+                except ValueError:
+                    mms_gate = -1
+
                 filament_attr = self._get_filament_attr(spool_info)
                 self.spool_location[spool_id] = (printer_name, mms_gate, filament_attr)
 
@@ -398,21 +412,36 @@ class MmsServer:
 
     async def _send_gate_map_update(self, gate_ids, replace=False, silent=False) -> bool:
         if self._mms_backend_enabled():
-            gate_dict = {
-                gate: (
-                    {'spool_id': -1} if spool_id < 0 else
-                    self.spool_location.get(spool_id)[2].copy()
-                    if self.spool_location.get(spool_id)
-                    else logging.error(f"Spool id {spool_id} requested but not found in spoolman")
-                )
-                for gate, spool_id in gate_ids
-            }
-            try:
-                # Assuming MMS might not have a direct equivalent to MMU_GATE_MAP, we might just log or pass
-                await self._log_n_send(f"MMS Spoolman Gate Map Update: {gate_dict}", silent=silent)
-            except Exception as e:
-                await self._log_n_send(f"Exception running MMS Gate Map update: {str(e)}", error=True, silent=silent)
-                return False
+            for gate, spool_id in gate_ids:
+                if spool_id is None or spool_id < 0:
+                    await self.klippy_apis.run_gcode(f"MMS_SLOT_MAP SLOT={gate} RESET=1 QUIET=1 SYNC=0")
+                    continue
+                
+                # Get from cache or fetch
+                attr = None
+                if spool_id in self.spool_location:
+                    attr = self.spool_location[spool_id][2]
+                
+                if not attr:
+                    attr = await self._fetch_spool_info(spool_id)
+                
+                if not attr:
+                    continue
+
+                vendor = attr.get('vendor', '')
+                material = attr.get('material', '')
+                color = attr.get('color', '').strip('#')
+                name = attr.get('name', '')
+                
+                # Construct MMS_SLOT_MAP command
+                # Use SYNC=0 to avoid loop back to moonraker
+                cmd = f"MMS_SLOT_MAP SLOT={gate} SPOOLID={spool_id} QUIET=1 SYNC=0"
+                if vendor: cmd += f" VENDOR='{vendor}'"
+                if material: cmd += f" MATERIAL='{material}'"
+                if color: cmd += f" COLOR='{color}'"
+                if name: cmd += f" NAME='{name}'"
+                
+                await self.klippy_apis.run_gcode(cmd)
         return True
 
     async def refresh_cache(self, fix=False, silent=False) -> bool:
@@ -474,7 +503,7 @@ class MmsServer:
                         self.server.send_event("spoolman:set_spool_gate", {"spool_id": sid, "printer": self.printer_hostname, "gate": gate})
                         await self._log_n_send(f"Spool {sid} assigned to printer {self.printer_hostname} @ gate {gate} in Spoolman db", silent=silent)
 
-            return await self._send_gate_map_update(gate_ids, silent=silent)
+            return True
 
     async def pull_gate_map(self, silent=False) -> bool:
         if not await self._check_init_spoolman(): return
@@ -601,6 +630,48 @@ class MmsServer:
                 return await self._send_gate_map_update(gate_ids, replace=True, silent=silent)
             return True
 
+    async def write_to_rfid(self, slot_num: int, spool_id: int, align: int = 1):
+        if not await self._check_init_spoolman(): return
+
+        # Fetch spool info from Spoolman
+        spool_info = await self._fetch_spool_info(spool_id)
+        if not spool_info:
+            await self._log_n_send(f"Spool id {spool_id} not found, cannot write to RFID", error=True)
+            return
+
+        attr = self._get_filament_attr(spool_info)
+
+        # Map Spoolman attributes to MMS RFID JSON format
+        # This aligns with Klipper's slot_rfid.py expected format (BTT format)
+        rfid_data = {
+            "spool_id": spool_id,
+            "filament_manufacturer": attr.get("vendor", ""),
+            "filament_material_type": attr.get("material", ""),
+            "color_code": attr.get("color", "").strip("#"),
+            "color_name_a": attr.get("name", ""),
+            "filament_type_detailed": attr.get("name", "")
+        }
+
+        if attr.get("temp"):
+            rfid_data["nozzle_temp"] = attr.get("temp")
+        if attr.get("bed_temp"):
+            rfid_data["bed_temperature"] = attr.get("bed_temp")
+
+        # Build Klipper Command
+        import json
+        data_str = json.dumps(rfid_data)
+        # Re-invoke the Klipper command, but this time with the constructed DATA
+        # We don't pass SPOOLID again to avoid an infinite loop
+        cmd = f"MMS_RFID_WRITE SLOT={slot_num} ALIGN={align} DATA='{data_str}'"
+        
+        log_msg = f"Writing Spool {spool_id} to RFID on Slot {slot_num}: "
+        log_msg += f"{rfid_data.get('filament_manufacturer', 'Unknown')} "
+        log_msg += f"{rfid_data.get('filament_material_type', 'Unknown')} "
+        log_msg += f"({rfid_data.get('color_code', 'NoColor')})"
+        
+        await self._log_n_send(log_msg)
+        await self.klippy_apis.run_gcode(cmd)
+
     async def display_spool_info(self, spool_id: int | None = None):
         async with self.cache_lock:
             active = "Spool"
@@ -726,6 +797,8 @@ class MmsServer:
                     if data.get('color'): parts.append(f"COLOR='{data['color']}'")
                     if data.get('vendor_name'): parts.append(f"VENDOR='{data['vendor_name']}'")
                     if data.get('name'): parts.append(f"NAME='{data['name']}'")
+                    if data.get('spool_id'): parts.append(f"SPOOLID={data['spool_id']}")
+                    if data.get('filament_id'): parts.append(f"FILAMENT_ID='{data['filament_id']}'")
                     
                     # Handle temps (avoid 0.0 or None)
                     bt = data.get('bed_temp')
@@ -766,9 +839,9 @@ class MmsServer:
             logging.error(f"Error cleaning up lane data: {e}")
 
     def setup_placeholder_processor(self, config):
-        args = " -m" if config.getboolean("enable_file_preprocessor", True) else ""
-        args += " -n" if config.getboolean("enable_toolchange_next_pos", True) else ""
-        
+        args = " -m" if self.enable_file_preprocessor else ""
+        args += " -n" if self.enable_toolchange_next_pos else ""
+
         # Link the custom MMS preprocessor script to Moonraker's file_manager
         script_path = os.path.join(os.path.dirname(__file__), '../../scripts/mms_preprocessor.py')
         if os.path.exists(script_path):

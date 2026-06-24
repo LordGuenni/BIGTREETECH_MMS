@@ -71,12 +71,15 @@ from ..core.config import PrinterConfig
 # Utils
 def is_valid_color_code(color_code):
     """
-    Check if the given color code is in the format "#RRGGBB".
+    Check if the given color code is in the format "#RRGGBB" or "RRGGBB".
     color_code (str): The color code to validate.
     """
+    # Strip optional '#' prefix
+    if color_code.startswith("#"):
+        color_code = color_code[1:]
+        
     pattern = "^[0-9A-Fa-f]{6}$"
     # Match the color code against the regular expression
-    # return True if re.match(pattern, color_code) else False
     return bool(re.match(pattern, color_code))
 
 

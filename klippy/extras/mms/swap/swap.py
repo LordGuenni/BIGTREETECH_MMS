@@ -354,13 +354,6 @@ class MMSSwap:
                 f"{log_prefix} safety checks failed")
             return False
 
-        if self.skip_same_slot and slot_num_from == slot_num_to \
-            and self.mms_charge.get_charged_slot() == slot_num_to:
-            self.log_info(
-                f"target slot[{slot_num_to}] is already current, skip swap")
-            self._exec_custom_macro(self.custom_after, "after")
-            return True
-
         self.log_info_s(f"{log_prefix} begin")
         self.log_info_s(
             f"{log_prefix} determine loading slots: {loading_slots}"
@@ -448,6 +441,16 @@ class MMSSwap:
         if not self.mms.slot_is_available(cmd_slot_num):
             self.log_error(f"invalid command: {cmd}")
             return False
+
+        if self.is_enabled():
+            slot_num_from = self.mms.get_current_slot()
+            slot_num_to = self.get_mapping_slot_num(cmd_slot_num)
+
+            if self.skip_same_slot and slot_num_from == slot_num_to \
+                and self.mms_charge.get_charged_slot() == slot_num_to:
+                self.log_info(
+                    f"target slot[{slot_num_to}] is already current, skip swap")
+                return True
 
         with toolhead_adapter.snapshot():
             # with toolhead_adapter.safe_z_raise(self.z_raise):

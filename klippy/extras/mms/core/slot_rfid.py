@@ -155,6 +155,23 @@ class SlotRFID:
         success = self.mms_rfid.write_ntag(data)
         result = "success" if success else "failed"
         self.log_info(f"SLOT[{self.slot_num}] RFID write {result}")
+        
+        if success:
+            import json
+            try:
+                # data is expected to be a JSON string here
+                parsed_data = json.loads(data) if isinstance(data, str) else data
+                self.tag_data = parsed_data
+                self.tag_color = parsed_data.get("color_code", None)
+                if self.tag_color:
+                    if not self.tag_color.startswith("#"):
+                        self.tag_color = f"#{self.tag_color}"
+                # Apply the written data immediately to the slot map
+                self.log_info(f"SLOT[{self.slot_num}] applying written data to local map")
+                self._apply_tag_data()
+            except Exception as e:
+                self.log_warning(f"Failed to parse written data for local sync: {e}")
+                
         return success
 
     # ---- Detect ----
@@ -380,16 +397,39 @@ class SlotRFID:
 
     def _apply_tag_data(self):
         if not self.tag_data: return
-        
+
         self.mms_slot.set_filament_color(self.tag_color)
         self.mms_slot.set_filament_material(
             self.tag_data.get("filament_material_type")
         )
+
+        # Ensure spool_id is captured if available from RFID
+        spool_id = self.tag_data.get("spool_id")
+        if spool_id is not None:
+            self.mms_slot.set_spool_id(spool_id)
+
         self.mms_slot.set_filament_info(self.tag_data)
 
         mms = printer_adapter.get_mms()
         if mms:
-            mms.notify_lane_data_changed([self.slot_num])
+            # Update the Klipper Screen & Moonraker lane data
+            mms.notify_lane_data_changed(slot_nums=[self.slot_num])
+
+            # RFID Data Priority: Push to Spoolman regardless of push/pull mode
+            if hasattr(mms, 'spoolman_support') and mms.spoolman_support != "off":
+                webhooks = printer_adapter.get_obj("webhooks")
+                if spool_id is not None and spool_id > 0:
+                    # Assign this Spool ID to the gate in Spoolman
+                    webhooks.call_remote_method(
+                        "spoolman_set_spool_gate",
+                        spool_id=spool_id, gate=self.slot_num, sync=True
+                    )
+                else:
+                    # For raw RFID tags without a specific Spoolman ID, 
+                    # we do not dynamically generate a new spool in Spoolman here. 
+                    # We simply ensure the local gate map accurately reflects the physical tag.
+                    pass
+
 
         # Set LED color
         self.mms_slot.slot_led.rfid_set_color(self.tag_color)

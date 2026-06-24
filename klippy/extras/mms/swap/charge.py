@@ -660,6 +660,13 @@ class MMSCharge:
         gcode_adapter.respond_echo(msg)
         self.log_info_s(msg)
 
+        # Notify Spoolman
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        spool_id = mms_slot.meta.spool_id
+        if spool_id is not None and spool_id > 0:
+            webhooks = printer_adapter.get_obj("webhooks")
+            webhooks.call_remote_method("spoolman_set_active_spool", spool_id=spool_id)
+
         self._exec_custom_macro(self.custom_after, "after")
 
     # ---- GCode ----

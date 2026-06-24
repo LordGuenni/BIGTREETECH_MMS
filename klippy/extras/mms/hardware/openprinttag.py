@@ -236,6 +236,11 @@ class OPTDecoder:
         except Exception:
             pass
 
+        # Spoolman ID (General Purpose Range Key 65400)
+        spool_id = opt_data.get(65400)
+        if spool_id is not None:
+            res["spool_id"] = int(spool_id)
+
         return res
 
 class CBOREncoder:
@@ -368,37 +373,74 @@ class OPTEncoder:
         if 8 not in opt_data:
             opt_data[8] = 0
 
+        # Spoolman ID integration using General Purpose Range
+        if "spool_id" in input_data:
+            opt_data[65400] = int(input_data["spool_id"])
+            # Special internal key to denote aux region 'general_purpose_range_user'
+            opt_data["_aux_2"] = "Spoolman"
+
         return opt_data
 
     def encode(self, opt_data):
-        # 1. Main Region: definite CBOR map (matches working tag format)
+        main_dict = {}
+        aux_dict = {}
+        
+        for k, v in opt_data.items():
+            if k == "_aux_2":
+                aux_dict[2] = v
+            else:
+                main_dict[k] = v
+
+        # 1. Main Region: definite CBOR map
         main_enc = CBOREncoder()
-        main_enc.encode(opt_data)
+        main_enc.encode(main_dict)
         main_data = bytes(main_enc.data)
         main_size = len(main_data)
 
-        # 2. Meta Region: definite CBOR map {0: MAIN_OFF, 1: main_size}
-        # meta key 0 = main_region_offset, key 1 = main_region_size (no aux region)
-        # MAIN_OFF = meta encoding size (self-consistent):
-        #   main_size <  24: A2 00 MM 01 SS       = 5 bytes → MAIN_OFF=5
-        #   main_size < 256: A2 00 MM 01 18 SS     = 6 bytes → MAIN_OFF=6
-        #   main_size <65536: A2 00 MM 01 19 SS SS = 7 bytes → MAIN_OFF=7
-        if main_size < 24:
-            MAIN_OFF = 5
-        elif main_size < 256:
-            MAIN_OFF = 6
-        else:
-            MAIN_OFF = 7
+        # 2. Aux Region (if any)
+        aux_size = 0
+        aux_data = b""
+        if aux_dict:
+            aux_enc = CBOREncoder()
+            aux_enc.encode(aux_dict)
+            aux_data = bytes(aux_enc.data)
+            aux_size = len(aux_data)
+
+        # 3. Meta Region: definite CBOR map
+        meta_dict = {0: 0, 1: main_size}
+        if aux_dict:
+            meta_dict[2] = 0
+            meta_dict[3] = aux_size
+
         meta_enc = CBOREncoder()
-        meta_enc.encode({0: MAIN_OFF, 1: main_size})
+        meta_enc.encode(meta_dict)
+        meta_size = len(meta_enc.data)
+        
+        meta_dict[0] = meta_size
+        if aux_dict:
+            meta_dict[2] = meta_size + main_size
+            
+        meta_enc = CBOREncoder()
+        meta_enc.encode(meta_dict)
+        meta_size_2 = len(meta_enc.data)
+        
+        if meta_size_2 != meta_size:
+            meta_dict[0] = meta_size_2
+            if aux_dict:
+                meta_dict[2] = meta_size_2 + main_size
+            meta_enc = CBOREncoder()
+            meta_enc.encode(meta_dict)
+
         meta_data = bytes(meta_enc.data)
 
-        # 3. CBOR payload = meta + main (no aux region)
+        # 4. CBOR payload = meta + main + aux
         cbor_payload = bytearray()
-        cbor_payload.extend(meta_data)  # bytes [0, MAIN_OFF)
-        cbor_payload.extend(main_data)  # bytes [MAIN_OFF, MAIN_OFF+main_size)
+        cbor_payload.extend(meta_data)
+        cbor_payload.extend(main_data)
+        if aux_data:
+            cbor_payload.extend(aux_data)
 
-        # 4. NDEF Record
+        # 5. NDEF Record
         # The CC lives at NTAG page 3 and is NOT written here.
         # User memory (page 4) must start with the NDEF Message TLV (0x03).
         # Use SR=1 (Short Record, 1-byte payload length) when payload fits in 1 byte,
@@ -417,7 +459,7 @@ class OPTEncoder:
         ndef_record.extend(type_str)
         ndef_record.extend(cbor_payload)
 
-        # 5. NDEF Message TLV (0x03) + Terminator (0xFE)
+        # 6. NDEF Message TLV (0x03) + Terminator (0xFE)
         ndef_len = len(ndef_record)
         result = bytearray()
         result.append(0x03)
