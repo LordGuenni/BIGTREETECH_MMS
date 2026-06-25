@@ -56,12 +56,6 @@
   "container_outer_diameter": 200,
   "container_inner_diameter": 100,
   "container_hole_diameter": 52,
-  "viscosity_18c": 100,
-  "viscosity_25c": 80,
-  "viscosity_40c": 60,
-  "viscosity_60c": 40,
-  "container_volumetric_capacity": 1000,
-  "cure_wavelength": 405,
   "drying_temperature": 45,
   "drying_time": 480
 }

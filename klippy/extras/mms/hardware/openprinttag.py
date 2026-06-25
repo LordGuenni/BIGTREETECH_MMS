@@ -310,8 +310,6 @@ class OPTEncoder:
         "max_bed_temperature": 38, "min_chamber_temperature": 39, "max_chamber_temperature": 40,
         "chamber_temperature": 41, "container_width": 42, "container_outer_diameter": 43,
         "container_inner_diameter": 44, "container_hole_diameter": 45,
-        "viscosity_18c": 46, "viscosity_25c": 47, "viscosity_40c": 48, "viscosity_60c": 49,
-        "container_volumetric_capacity": 50, "cure_wavelength": 51,
         "material_abbreviation": 52, "nominal_full_length": 53, "actual_full_length": 54,
         "country_of_origin": 55, "certifications": 56, "drying_temperature": 57,
         "drying_time": 58, "primary_color_lab": 59, "primary_color_ral": 60
