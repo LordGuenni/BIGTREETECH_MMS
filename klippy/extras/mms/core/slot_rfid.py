@@ -162,7 +162,7 @@ class SlotRFID:
                 # data is expected to be a JSON string here
                 parsed_data = json.loads(data) if isinstance(data, str) else data
                 self.tag_data = parsed_data
-                self.tag_color = parsed_data.get("color_code", None)
+                self.tag_color = parsed_data.get("color_code") or parsed_data.get("primary_color")
                 if self.tag_color:
                     if not self.tag_color.startswith("#"):
                         self.tag_color = f"#{self.tag_color}"
