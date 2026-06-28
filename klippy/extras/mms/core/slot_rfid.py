@@ -150,6 +150,69 @@ class SlotRFID:
             
         return success
 
+    def align_and_read(self):
+        mms = printer_adapter.get_mms()
+        # Safety checks
+        if mms.printer_is_printing():
+            self.log_error(f"slot[{self.slot_num}] printer is printing, read operation blocked")
+            return False
+            
+        if self.mms_slot.gate.is_triggered():
+            self.log_error(f"slot[{self.slot_num}] filament is loaded past gate, read operation blocked")
+            return False
+            
+        if not self.mms_slot.inlet.is_triggered():
+            self.log_error(f"slot[{self.slot_num}] slot is empty, read operation blocked")
+            return False
+            
+        self.log_info(f"slot[{self.slot_num}] aligning RFID tag for read...")
+        
+        from .exceptions import DeliveryTerminateSignal
+        
+        self.tag_uid = None
+        self.detect_only_begin()
+        
+        mms_delivery = printer_adapter.get_mms_delivery()
+        try:
+            # Safely move BACKWARD until the inlet releases or we move 800mm
+            mms_delivery._unload_to_release(
+                self.slot_num, 
+                self.mms_slot.pin_type.inlet, 
+                distance=800, 
+                speed=40
+            )
+        except DeliveryTerminateSignal:
+            pass # tag was found and movement stopped by _handle_detected_only
+        except Exception as e:
+            self.log_warning(f"slot[{self.slot_num}] align interrupted: {e}")
+            
+        self.detect_only_end()
+        
+        success = False
+        if not self.tag_uid:
+            self.log_warning(f"slot[{self.slot_num}] RFID tag not detected during alignment")
+        else:
+            self.log_info(f"slot[{self.slot_num}] RFID tag aligned, starting read...")
+            self.rfid_read_begin()
+            
+            # Wait for async read to finish
+            start_time = time.time()
+            # Default read_duration is usually a few seconds. We'll wait up to read_duration + 2s
+            timeout = (self.read_duration or 5.0) + 2.0
+            while self._is_reading and (time.time() - start_time) < timeout:
+                time.sleep(0.1)
+                
+            success = not self._is_reading and self.tag_data is not None
+
+        # NOW restore filament to the standard "Preload" position
+        try:
+            self.log_info(f"slot[{self.slot_num}] alignment sequence finished, restoring filament...")
+            mms_delivery.autoload_to_gate(self.slot_num)
+        except Exception as e:
+            self.log_warning(f"slot[{self.slot_num}] failed to restore filament position: {e}")
+            
+        return success
+
     def rfid_write(self, data):
         self.log_info(f"SLOT[{self.slot_num}] RFID write begin")
         success = self.mms_rfid.write_ntag(data)

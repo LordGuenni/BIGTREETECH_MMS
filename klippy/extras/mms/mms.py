@@ -1309,10 +1309,18 @@ class MMS:
         if not self.slot_is_available(slot_num):
             return
         switch = gcmd.get_int("SWITCH", 0)
+        align = gcmd.get_int("ALIGN", default=1)
 
         mms_slot = self.get_mms_slot(slot_num)
         if switch == 1:
-            mms_slot.slot_rfid.rfid_read_begin()
+            if align:
+                mms_delivery = printer_adapter.get_mms_delivery()
+                mms_delivery.deliver_async_task(
+                    mms_slot.slot_rfid.align_and_read,
+                    {}
+                )
+            else:
+                mms_slot.slot_rfid.rfid_read_begin()
         else:
             mms_slot.slot_rfid.rfid_read_end()
 
