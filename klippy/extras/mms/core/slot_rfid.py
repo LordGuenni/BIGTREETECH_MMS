@@ -119,10 +119,10 @@ class SlotRFID:
         
         mms_delivery = printer_adapter.get_mms_delivery()
         try:
-            # Safely move BACKWARD until the inlet releases or we move 800mm
-            mms_delivery._unload_to_release(
+            # Safely move FORWARD until the gate triggers or we move 800mm
+            mms_delivery._load_to_trigger(
                 self.slot_num, 
-                self.mms_slot.pin_type.inlet, 
+                self.mms_slot.pin_type.gate, 
                 distance=800, 
                 speed=40
             )
@@ -174,10 +174,10 @@ class SlotRFID:
         
         mms_delivery = printer_adapter.get_mms_delivery()
         try:
-            # Safely move BACKWARD until the inlet releases or we move 800mm
-            mms_delivery._unload_to_release(
+            # Safely move FORWARD until the gate triggers or we move 800mm
+            mms_delivery._load_to_trigger(
                 self.slot_num, 
-                self.mms_slot.pin_type.inlet, 
+                self.mms_slot.pin_type.gate, 
                 distance=800, 
                 speed=40
             )
