@@ -978,6 +978,29 @@ class MMSDelivery:
         self.log_warning(msg)
         raise DeliveryReadyError(msg, mms_slot)
 
+    def shared_path_is_free(self, slot_num):
+        # The printer must not be printing
+        if self.mms.printer_is_printing():
+            return False
+
+        # Check if the outlet or entry sensors are triggered for any slot
+        mms_slot = self.mms.get_mms_slot(slot_num)
+        if mms_slot.outlet.is_triggered():
+            return False
+        if mms_slot.entry_is_set() and mms_slot.entry_is_triggered():
+            return False
+
+        # Check if any other slot is currently active/loading
+        for s_num in self.mms.get_slot_nums():
+            if s_num != slot_num:
+                s = self.mms.get_mms_slot(s_num)
+                if s.outlet.is_triggered():
+                    return False
+                if s.entry_is_set() and s.entry_is_triggered():
+                    return False
+
+        return True
+
     def _safety_retract(self, slot_num):
         self.move_backward(
             slot_num,
@@ -1170,6 +1193,57 @@ class MMSDelivery:
         if mms_slot.selector.is_triggered():
             mms_selector = mms_slot.get_mms_selector()
             mms_selector.update_focus_slot(slot_num)
+
+        # Check if the RFID reader is clear after load.
+        # If not, rotate the spool back a little (away from buffer / toolhead) until clear.
+        if mms_slot.slot_rfid.is_enabled():
+            tag_uid = mms_slot.slot_rfid.detect_tag()
+            if tag_uid:
+                self.log_info(
+                    f"slot[{slot_num}] RFID reader is not clear after load. "
+                    "Rotating spool back to clear RFID reader..."
+                )
+                step_dist = 10.0  # mm per step
+                max_retract = 80.0  # mm maximum total retraction
+                total_retracted = 0.0
+                clear_success = False
+
+                self.select_slot(slot_num, reverse=True)
+
+                while total_retracted < max_retract:
+                    if not mms_slot.inlet.is_triggered():
+                        self.log_warning(
+                            f"slot[{slot_num}] inlet released during RFID clear retract. Stopping."
+                        )
+                        break
+
+                    try:
+                        self.move_backward(
+                            slot_num,
+                            step_dist,
+                            self.pd_config.sprint_speed,
+                            self.pd_config.sprint_accel
+                        )
+                        total_retracted += step_dist
+                    except Exception as e:
+                        self.log_warning(
+                            f"slot[{slot_num}] RFID clear retract interrupted: {e}"
+                        )
+                        break
+
+                    # Check again
+                    tag_uid = mms_slot.slot_rfid.detect_tag()
+                    if not tag_uid:
+                        self.log_info(
+                            f"slot[{slot_num}] RFID reader is now clear after rotating spool back {total_retracted:.2f} mm."
+                        )
+                        clear_success = True
+                        break
+
+                if not clear_success:
+                    self.log_warning(
+                        f"slot[{slot_num}] reached max retract distance {max_retract} mm but RFID reader is still not clear."
+                    )
 
     def preload_to_gate(self, slot_num):
         # Pre-load don't need to check Inlet
