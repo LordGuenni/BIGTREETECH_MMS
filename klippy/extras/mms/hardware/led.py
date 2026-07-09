@@ -103,6 +103,9 @@ def color_code_to_rgbw(color_code):
         => (0, 49, 137, 100)
         => (0, 0.19, 0.54, 0.39)
     """
+    if color_code.startswith("#"):
+        color_code = color_code[1:]
+
     r, g, b = [int(color_code[i:i+2], 16) for i in range(0, 6, 2)]
     w = min(r, g, b)
 
