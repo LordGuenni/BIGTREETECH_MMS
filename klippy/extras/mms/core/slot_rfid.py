@@ -121,7 +121,7 @@ class SlotRFID:
             self.log_info(f"slot[{self.slot_num}] shared path is free, rotating spool forward ({distance}mm)")
             try:
                 # Safely move FORWARD into the shared path
-                mms_delivery._deliver_distance(
+                mms_delivery._drip_deliver_distance(
                     self.slot_num, 
                     distance=distance, 
                     speed=40
@@ -208,7 +208,7 @@ class SlotRFID:
             self.log_info(f"slot[{self.slot_num}] shared path is free, rotating spool forward ({distance}mm)")
             try:
                 # Safely move FORWARD into the shared path
-                mms_delivery._deliver_distance(
+                mms_delivery._drip_deliver_distance(
                     self.slot_num, 
                     distance=distance, 
                     speed=40

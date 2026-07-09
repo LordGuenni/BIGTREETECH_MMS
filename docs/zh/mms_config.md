@@ -88,6 +88,7 @@ MMS_SLOT_MAP RESET=1
 *   **MMS_RFID_WRITE**: 向 RFID 标签写入元数据。
     *   `SLOT`: 料槽编号。
     *   `DATA`: 包含耗材元数据的 JSON 字符串。
+    *   `SPOOL_ID`: （可选）提取指定 ID 的 Spoolman 数据并将其写入 RFID 标签。
     *   `ALIGN`: （默认：1）如果为 1，在写入前自动将标签与天线对齐。
 *   **MMS_RFID_TRUNCATE**: 清除料槽的缓存 RFID 数据。
     *   `SLOT`: 料槽编号。
@@ -95,7 +96,11 @@ MMS_SLOT_MAP RESET=1
 
 **MMS_RFID_WRITE 示例:**
 ```
+# 写入手动数据
 MMS_RFID_WRITE SLOT=0 DATA='{"brand_name": "BTT", "material_type": "PLA", "primary_color": "FF0000"}'
+
+# 从 Spoolman ID 写入
+MMS_RFID_WRITE SLOT=0 SPOOL_ID=24
 ```
 所有支持的字段请参考 `config/bigtreetech-mms/rfid/rfid_write.json`。
 

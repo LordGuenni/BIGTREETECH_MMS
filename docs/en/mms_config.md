@@ -137,6 +137,7 @@ Manage RFID tags for filament identification.
 *   **MMS_RFID_WRITE**: Writes metadata to an RFID tag.
     *   `SLOT`: Slot number.
     *   `DATA`: JSON string containing filament metadata.
+    *   `SPOOL_ID`: (Optional) Fetch Spoolman data for the specified ID and write it to the RFID tag.
     *   `ALIGN`: (Default: 1) If 1, automatically aligns the tag with the antenna before writing.
 *   **MMS_RFID_TRUNCATE**: Clears cached RFID data for a slot.
     *   `SLOT`: Slot number.
@@ -144,7 +145,11 @@ Manage RFID tags for filament identification.
 
 **MMS_RFID_WRITE Example:**
 ```
+# Write manual data
 MMS_RFID_WRITE SLOT=0 DATA='{"brand_name": "BTT", "material_type": "PLA", "primary_color": "FF0000"}'
+
+# Write from Spoolman ID
+MMS_RFID_WRITE SLOT=0 SPOOL_ID=24
 ```
 See `config/bigtreetech-mms/rfid/rfid_write.json` for all supported fields.
 
