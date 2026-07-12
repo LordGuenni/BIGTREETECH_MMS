@@ -462,8 +462,9 @@ class MMS:
                 mms_buffer.deactivate_monitor)
 
         # Register Eject for Print finish
-        self.print_observer.register_finish_callback(
-            self.mms_eject.mms_eject_unselect)
+        if self.mms_eject.eject_at_print_end:
+            self.print_observer.register_finish_callback(
+                self.mms_eject.mms_eject_unselect)
         # Register Charge teardown for Print finish
         self.print_observer.register_finish_callback(
             self.mms_charge.teardown)

@@ -71,6 +71,9 @@ class PrinterEjectConfig(PrinterConfig):
     # Unit: mm/min
     retract_speed: float = 600.0
 
+    # Eject at print end (1=enable, 0=disable)
+    eject_at_print_end: int = 1
+
     # Custom Macro
     custom_before: OptionalField = "MMS_EJECT_CUSTOM_BEFORE"
     custom_after: OptionalField = "MMS_EJECT_CUSTOM_AFTER"
@@ -409,6 +412,7 @@ class MMSEject:
             self.log_warning("another eject is running, return")
             return False
 
+        prev_target = extruder_adapter.get_target_temp()
         try:
             self._standard_eject_async(check_entry)
             self.mms_charge.teardown()
@@ -418,6 +422,9 @@ class MMSEject:
         except Exception as e:
             self.log_error(f"eject error: {e}")
             return False
+        finally:
+            if extruder_adapter.get_target_temp() > prev_target:
+                extruder_adapter.set_temperature(prev_target, wait=False)
 
         self._exec_custom_macro(self.custom_after, "after")
         return True
@@ -537,15 +544,20 @@ class MMSEject:
         try:
             self._exec_custom_macro(self.custom_before, "before")
 
-            res = self._standard_eject()
-            self.mms_charge.teardown()
-            if res:
-                # Notify Spoolman
-                webhooks = printer_adapter.get_obj("webhooks")
-                webhooks.call_remote_method("spoolman_set_active_spool", spool_id=None)
+            prev_target = extruder_adapter.get_target_temp()
+            try:
+                res = self._standard_eject()
+                self.mms_charge.teardown()
+                if res:
+                    # Notify Spoolman
+                    webhooks = printer_adapter.get_obj("webhooks")
+                    webhooks.call_remote_method("spoolman_set_active_spool", spool_id=None)
 
-                self._exec_custom_macro(self.custom_after, "after")
-            return res
+                    self._exec_custom_macro(self.custom_after, "after")
+                return res
+            finally:
+                if extruder_adapter.get_target_temp() > prev_target:
+                    extruder_adapter.set_temperature(prev_target, wait=False)
 
         except EjectFailedError as e:
             self.log_warning(e)
