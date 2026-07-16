@@ -458,7 +458,8 @@ class SlotRFID:
                     raw_data = bytes.fromhex(raw_hex)
                     
                     from ..hardware.universal_tag_parser import parse_tag
-                    parsed_info = parse_tag(raw_data)
+                    user_memory = raw_data[16:] if len(raw_data) > 16 else raw_data
+                    parsed_info = parse_tag(user_memory)
                     
                     if parsed_info and "error" not in parsed_info:
                         self.log_info(f"slot[{self.slot_num}] Universal tag decoded: {parsed_info.get('tag_format', 'unknown')}")
@@ -497,7 +498,8 @@ class SlotRFID:
                 return
 
             from ..hardware.universal_tag_parser import parse_tag
-            parsed_info = parse_tag(raw_data)
+            user_memory = raw_data[16:] if len(raw_data) > 16 else raw_data
+            parsed_info = parse_tag(user_memory)
             
             if parsed_info and "error" not in parsed_info:
                 self.log_info(f"slot[{self.slot_num}] Universal tag decoded: {parsed_info.get('tag_format', 'unknown')}")
