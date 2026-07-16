@@ -10,7 +10,6 @@ import traceback
 from contextlib import contextmanager
 
 from ..adapters import printer_adapter
-from ..hardware.openprinttag import OPTDecoder
 
 
 class SlotRFID:
@@ -456,18 +455,26 @@ class SlotRFID:
                 # 2. Universal Read Fallback (contains raw ntag data)
                 elif tag_dict.get("_type") == "ntag_raw":
                     raw_hex = tag_dict.get("data", "")
-                    self.log_info(f"slot[{self.slot_num}] NTAG chip detected, trying OpenPrintTag decoder...")
                     raw_data = bytes.fromhex(raw_hex)
                     
-                    decoder = OPTDecoder()
-                    opt_data = decoder.decode(raw_data)
-                    if opt_data:
-                        self.log_info(f"slot[{self.slot_num}] OpenPrintTag decoded: {opt_data}")
-                        mapped = decoder.map_to_mms(opt_data)
-                        if mapped:
-                            self.tag_data = mapped
-                            self.tag_color = mapped.get("color_code")
-                            self._apply_tag_data()
+                    from ..hardware.universal_tag_parser import parse_tag
+                    parsed_info = parse_tag(raw_data)
+                    
+                    if parsed_info and "error" not in parsed_info:
+                        self.log_info(f"slot[{self.slot_num}] Universal tag decoded: {parsed_info.get('tag_format', 'unknown')}")
+                        
+                        self.tag_data = {
+                            "filament_manufacturer": parsed_info.get("brand", "Unknown"),
+                            "filament_material_type": parsed_info.get("material", "Unknown"),
+                            "filament_type_detailed": parsed_info.get("material_detail", ""),
+                            "color_code": parsed_info.get("color_hex", "607D8B"),
+                            "bed_temperature": parsed_info.get("bed_temp"),
+                            "nozzle_temp": parsed_info.get("min_temp"),
+                            "spool_id": parsed_info.get("spoolman_id")
+                        }
+                        
+                        self.tag_color = self.tag_data["color_code"]
+                        self._apply_tag_data()
                     else:
                         self.log_info(f"slot[{self.slot_num}] Decoding Failed / Blank TAG Detected")
                 
@@ -489,19 +496,28 @@ class SlotRFID:
                 self.log_error(f"slot[{self.slot_num}] Failed to read NTAG data")
                 return
 
-            decoder = OPTDecoder()
-            opt_data = decoder.decode(raw_data)
-            if opt_data:
-                self.log_info(f"slot[{self.slot_num}] OpenPrintTag decoded: {opt_data}")
-                mapped = decoder.map_to_mms(opt_data)
-                if mapped:
-                    self.tag_data = mapped
-                    self.tag_color = mapped.get("color_code")
-                    self._apply_tag_data()
+            from ..hardware.universal_tag_parser import parse_tag
+            parsed_info = parse_tag(raw_data)
+            
+            if parsed_info and "error" not in parsed_info:
+                self.log_info(f"slot[{self.slot_num}] Universal tag decoded: {parsed_info.get('tag_format', 'unknown')}")
+                
+                self.tag_data = {
+                    "filament_manufacturer": parsed_info.get("brand", "Unknown"),
+                    "filament_material_type": parsed_info.get("material", "Unknown"),
+                    "filament_type_detailed": parsed_info.get("material_detail", ""),
+                    "color_code": parsed_info.get("color_hex", "607D8B"),
+                    "bed_temperature": parsed_info.get("bed_temp"),
+                    "nozzle_temp": parsed_info.get("min_temp"),
+                    "spool_id": parsed_info.get("spoolman_id")
+                }
+                
+                self.tag_color = self.tag_data["color_code"]
+                self._apply_tag_data()
             else:
                 self.log_info(f"slot[{self.slot_num}] Decoding Failed / Blank TAG Detected")
         except Exception as e:
-            self.log_error(f"slot[{self.slot_num}] OpenPrintTag read error: {e}")
+            self.log_error(f"slot[{self.slot_num}] Universal tag read error: {e}")
 
     def _apply_tag_data(self):
         if not self.tag_data: return
