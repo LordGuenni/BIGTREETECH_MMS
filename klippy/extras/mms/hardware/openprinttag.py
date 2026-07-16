@@ -386,6 +386,8 @@ class OPTEncoder:
         for k, v in opt_data.items():
             if k == "_aux_2":
                 aux_dict[2] = v
+            elif k == 65400:
+                aux_dict[k] = v
             else:
                 main_dict[k] = v
 
