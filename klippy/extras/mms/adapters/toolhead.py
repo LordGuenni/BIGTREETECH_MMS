@@ -230,43 +230,57 @@ class ToolheadAdapter(BaseAdapter):
             self.truncate_snapshot()
             return True
 
-        # XYZ
-        position = self._snapshot.get("position")
-        self.move_xy(
-            position_x = position["x"],
-            position_y = position["y"],
-            wait_toolhead = True
-        )
-        self.move_z(
-            position = position["z"],
-            wait_toolhead = True
-        )
+        try:
+            # Force absolute mode for restoring coordinates
+            gcode_move_adapter.enable_absolute_coordinates()
 
-        # Extruder heater
-        target_temp = self._snapshot.get("extruder_target_temp")
-        current_temp = self.get_extruder_heater_temp()
-        if target_temp > current_temp:
-            self.log_info_s(
-                f"current temp: {current_temp:.2f}, "
-                f"resume extruder saved target_temp: {target_temp:.2f}")
-            # Heat to snapshot temp
-            self.set_extruder_temperature(target_temp, wait=False)
-        elif target_temp < current_temp and not ignore_cool_down:
-            self.log_info_s(
-                f"current temp: {current_temp:.2f}, "
-                f"cooldown extruder to saved target_temp: {target_temp:.2f}")
-            # Cooldown to snapshot temp
-            self.set_extruder_temperature(target_temp, wait=True)
+            # XYZ
+            position = self._snapshot.get("position")
+            self.move_xy(
+                position_x = position["x"],
+                position_y = position["y"],
+                wait_toolhead = True
+            )
+            self.move_z(
+                position = position["z"],
+                wait_toolhead = True
+            )
 
-        # Fan
-        fan_speed = self._snapshot.get("fan_speed")
-        fan_adapter.set_speed(fan_speed)
+            # Restore original absolute/relative states
+            if not self._snapshot.get("absolute_coord", True):
+                gcode_move_adapter.disable_absolute_coordinates()
+            
+            if not self._snapshot.get("absolute_extrude", True):
+                gcode_move_adapter.disable_absolute_extrude()
+            else:
+                gcode_move_adapter.enable_absolute_extrude()
 
-        self.log_info_s("saved toolhead snapshot restore:")
-        self.log_snapshot(self._snapshot)
+            # Extruder heater
+            target_temp = self._snapshot.get("extruder_target_temp")
+            current_temp = self.get_extruder_heater_temp()
+            if target_temp > current_temp:
+                self.log_info_s(
+                    f"current temp: {current_temp:.2f}, "
+                    f"resume extruder saved target_temp: {target_temp:.2f}")
+                # Heat to snapshot temp
+                self.set_extruder_temperature(target_temp, wait=False)
+            elif target_temp < current_temp and not ignore_cool_down:
+                self.log_info_s(
+                    f"current temp: {current_temp:.2f}, "
+                    f"cooldown extruder to saved target_temp: {target_temp:.2f}")
+                # Cooldown to snapshot temp
+                self.set_extruder_temperature(target_temp, wait=True)
 
-        # Finally truncate saved state
-        self.truncate_snapshot()
+            # Fan
+            fan_speed = self._snapshot.get("fan_speed")
+            fan_adapter.set_speed(fan_speed)
+
+            self.log_info_s("saved toolhead snapshot restore:")
+            self.log_snapshot(self._snapshot)
+        finally:
+            # Finally truncate saved state
+            self.truncate_snapshot()
+            
         return True
 
     def truncate_snapshot(self):
