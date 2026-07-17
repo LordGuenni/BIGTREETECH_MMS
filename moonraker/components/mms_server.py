@@ -625,7 +625,7 @@ class MmsServer:
                 if spools and isinstance(spools, list) and len(spools) > 0:
                     spool_id = spools[0].get('id')
                     if spool_id:
-                        logging.info(f"Found spool {spool_id} matching RFID UID '{fmt}', assigning to gate {gate}")
+                        await self._log_n_send(f"Found spool {spool_id} matching RFID UID '{fmt}', assigning to gate {gate}", silent=silent)
                         return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
             except Exception as e:
                 pass
@@ -633,10 +633,10 @@ class MmsServer:
         # 2. Try Decoded Spool ID Match
         if decoded_spool_id:
             try:
-                logging.info(f"UID match failed, but found decoded Spool ID {decoded_spool_id}, assigning to gate {gate}")
+                await self._log_n_send(f"UID match failed, but found decoded Spool ID {decoded_spool_id}, assigning to gate {gate}", silent=silent)
                 return await self.set_spool_gate(spool_id=decoded_spool_id, gate=gate, sync=sync, silent=silent)
             except Exception as e:
-                logging.info(f"Failed to assign decoded spool ID: {e}")
+                await self._log_n_send(f"Failed to assign decoded spool ID: {e}", silent=silent)
 
         # 3. Neither matched
         logging.info(f"Could not match UID {uid} or decoded Spool ID {decoded_spool_id} in Spoolman.")
