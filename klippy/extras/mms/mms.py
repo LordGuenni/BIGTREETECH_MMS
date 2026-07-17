@@ -1477,9 +1477,9 @@ class MMS:
         is_error = gcmd.get_int("ERROR", 0)
 
         if is_error:
-            self.log_error_s(msg)
+            self.log_error(msg)
         else:
-            self.log_info_s(msg)
+            self.log_info(msg)
 
     def cmd_MMS_SLOT_COLOR(self, gcmd):
         """

@@ -127,6 +127,16 @@ MMS_SPOOLMAN REFRESH=1 FIX=1
 MMS_SPOOLMAN SPOOLINFO=1
 ```
 
+#### Spoolman RFID Integration
+
+When an RFID tag is scanned (during autoload or `MMS_RFID_READ`), the system processes the tag data using a strict priority hierarchy to ensure seamless Spoolman integration:
+
+1. **Top Priority (UID Match)**: Moonraker queries Spoolman to find a spool whose custom `rfid_tag` field matches the scanned UID. If found, this spool is assigned to the gate, immediately overwriting any locally decoded data.
+   - **Multi-tag support**: You can map multiple tags to a single spool by separating UIDs with commas in Spoolman (e.g., `88 53 9C 6B 2C, 14 4B 1F F6`).
+   - **Format-agnostic**: The UID format in Spoolman doesn't matter. Moonraker automatically tests all common formats (spaces, colons, dashes, no separators, uppercase, and lowercase) ensuring a robust match.
+2. **Second Priority (Decoded Spool ID)**: If the UID is not found in Spoolman, but Klipper successfully decoded a `spool_id` directly from the tag's memory (such as a BTT tag), Moonraker will query Spoolman for that specific ID and assign it.
+3. **Lowest Priority (Local Fallback)**: If the UID isn't registered in Spoolman, and there is no Spool ID written to the tag, Klipper acts as a pure fallback. It will extract whatever standard filament data it can (Material, Color, Temps) directly from the tag memory and apply it to the gate UI locally.
+
 #### RFID Commands
 
 Manage RFID tags for filament identification.

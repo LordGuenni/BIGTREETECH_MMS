@@ -623,12 +623,19 @@ class MmsServer:
             spools = response.json()
             if spools and isinstance(spools, list):
                 for spool in spools:
-                    spool_rfid = str(spool.get('extra', {}).get('rfid_tag', '')).strip(' \t\n\r"')
-                    if not spool_rfid:
+                    rfid_field = spool.get('extra', {}).get('rfid_tag', '')
+                    if isinstance(rfid_field, list):
+                        spool_rfids = [str(tag).strip(' \t\n\r"') for tag in rfid_field]
+                    elif isinstance(rfid_field, str):
+                        spool_rfids = [tag.strip(' \t\n\r"') for tag in rfid_field.split(',')]
+                    else:
+                        continue
+                        
+                    if not spool_rfids:
                         continue
                         
                     for fmt in formats_to_try:
-                        if spool_rfid == fmt:
+                        if fmt in spool_rfids:
                             spool_id = spool.get('id')
                             if spool_id:
                                 # Fix quotes for MMS_LOG
