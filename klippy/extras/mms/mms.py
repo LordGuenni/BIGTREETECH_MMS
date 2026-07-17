@@ -115,7 +115,7 @@ class MMS:
         printer = config.get_printer()
         start_args = printer.get_start_args()
         config_file = start_args.get('config_file', "")
-        vars_file = config.get('vars_file', 'mms_vars.cfg')
+        vars_file = config.get('vars_file', 'mms/mms_vars.cfg')
         if config_file:
             self.mms_vars_file = os.path.join(os.path.dirname(config_file), vars_file)
         else:
@@ -271,6 +271,7 @@ class MMS:
                         key = f"{prefix}calib_{pin_type.value}_{f_str}"
                         config['Variables'][key] = repr(d_dist.deliver_distance)
 
+            os.makedirs(os.path.dirname(self.mms_vars_file), exist_ok=True)
             with open(self.mms_vars_file, 'w') as f:
                 config.write(f)
         except Exception as e:
@@ -359,10 +360,16 @@ class MMS:
         # Try to sync data
         try:
             if self._is_connected:
-                # Step 1: Basic lane data pull (Restore state from local file)
+                # Step 1: Basic lane data pull
                 if self._sync_retry_count == 1:
-                    self._load_mms_vars()
-                    self.notify_lane_data_changed()
+                    if not self.mms_vars_file or not os.path.exists(self.mms_vars_file):
+                        # Migrate state from Moonraker DB if no local vars exist yet
+                        webhooks = printer_adapter.get_obj("webhooks")
+                        webhooks.call_remote_method("moonraker_pull_lane_data")
+                    else:
+                        # Restore state from local file
+                        self._load_mms_vars()
+                        self.notify_lane_data_changed()
                     return eventtime + 2.0 # Wait for commands to be processed
 
                 # Step 2: Spoolman specific sync
