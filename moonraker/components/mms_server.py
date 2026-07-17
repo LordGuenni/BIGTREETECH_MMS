@@ -616,19 +616,25 @@ class MmsServer:
         # Add lowercase versions to be completely bulletproof
         formats_to_try.extend([f.lower() for f in formats_to_try])
 
-        for fmt in formats_to_try:
-            encoded_fmt = urllib.parse.quote(fmt)
-            url = f'{self.spoolman.spoolman_url}/v1/spool?extra_rfid_tag={encoded_fmt}'
-            try:
-                response = await self.http_client.get(url=url)
-                spools = response.json()
-                if spools and isinstance(spools, list) and len(spools) > 0:
-                    spool_id = spools[0].get('id')
-                    if spool_id:
-                        await self._log_n_send(f"Found spool {spool_id} matching RFID UID '{fmt}', assigning to gate {gate}", silent=silent)
-                        return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
-            except Exception as e:
-                pass
+        url = f'{self.spoolman.spoolman_url}/v1/spool' # Fetch all spools, can't filter by custom field
+        try:
+            response = await self.http_client.get(url=url)
+            spools = response.json()
+            if spools and isinstance(spools, list):
+                for spool in spools:
+                    spool_rfid = str(spool.get('extra', {}).get('rfid_tag', '')).strip()
+                    if not spool_rfid:
+                        continue
+                        
+                    for fmt in formats_to_try:
+                        if spool_rfid == fmt:
+                            spool_id = spool.get('id')
+                            if spool_id:
+                                # Fix quotes for MMS_LOG
+                                await self._log_n_send(f'Found spool {spool_id} matching RFID UID "{fmt}", assigning to gate {gate}', silent=silent)
+                                return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
+        except Exception as e:
+            pass
 
         # 2. Try Decoded Spool ID Match
         if decoded_spool_id:
