@@ -73,6 +73,7 @@ class MmsServer:
             self.server.register_remote_method("spoolman_get_spool_info", self.display_spool_info)
             self.server.register_remote_method("spoolman_display_spool_location", self.display_spool_location)
             self.server.register_remote_method("spoolman_write_to_rfid", self.write_to_rfid)
+            self.server.register_remote_method("spoolman_lookup_spool_by_rfid", self.lookup_spool_by_rfid)
 
         # Moonraker lane data push for slicer integration
         self.server.register_remote_method("moonraker_push_lane_data", self.push_lane_data)
@@ -594,6 +595,25 @@ class MmsServer:
                 gate_ids = [(gate, spool_id) for gate, spool_id in updated_gate_ids.items()]
                 return await self._send_gate_map_update(gate_ids, replace=True, silent=silent)
             return True
+
+    async def lookup_spool_by_rfid(self, gate=None, uid=None, sync=False, silent=False) -> bool:
+        if not await self._check_init_spoolman(): return False
+        if gate is None or not uid:
+            return False
+
+        url = f'{self.spoolman.spoolman_url}/v1/spool?extra_rfid_tag={uid}'
+        try:
+            response = await self.http_client.get(url=url)
+            spools = response.json()
+            if spools and isinstance(spools, list) and len(spools) > 0:
+                spool_id = spools[0].get('id')
+                if spool_id:
+                    logging.info(f"Found spool {spool_id} matching RFID {uid}, assigning to gate {gate}")
+                    return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
+        except Exception as e:
+            logging.info(f"Failed to lookup spool by RFID from spoolman: {e}")
+        
+        return False
 
     async def unset_spool_gate(self, spool_id=None, gate=None, sync=False, silent=False) -> bool:
         if not await self._check_init_spoolman(): return

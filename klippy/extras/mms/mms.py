@@ -1402,7 +1402,7 @@ class MMS:
         slot_num = gcmd.get_int("SLOT", minval=0)
         if not self.slot_is_available(slot_num):
             return
-        switch = gcmd.get_int("SWITCH", 0)
+        switch = gcmd.get_int("SWITCH", 1)
         align = gcmd.get_int("ALIGN", default=1)
 
         mms_slot = self.get_mms_slot(slot_num)
@@ -1490,9 +1490,10 @@ class MMS:
         if not self.slot_is_available(slot_num):
             return
 
-        color_code = gcmd.get("CODE")
+        color = gcmd.get("CODE")
         mms_slot = self.get_mms_slot(slot_num)
-        mms_slot.set_filament_color(color_code)
+        mms_slot.set_filament_color(color)
+        self._save_mms_vars()
         self.notify_lane_data_changed([slot_num])
 
     def cmd_MMS_SLOT_MATERIAL(self, gcmd):
@@ -1507,6 +1508,7 @@ class MMS:
         material = gcmd.get("MATERIAL")
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.set_filament_material(material)
+        self._save_mms_vars()
         self.notify_lane_data_changed([slot_num])
 
     def cmd_MMS_SLOT_SPOOL(self, gcmd):
@@ -1522,6 +1524,7 @@ class MMS:
         spool_id = gcmd.get_int("SPOOL_ID", default=-1)
         mms_slot = self.get_mms_slot(slot_num)
         mms_slot.set_spool_id(spool_id)
+        self._save_mms_vars()
         self.notify_lane_data_changed([slot_num])
 
     def cmd_MMS_SPOOLMAN(self, gcmd):
@@ -1753,6 +1756,8 @@ class MMS:
         nozzle_temp_set,
         spool_id,
         spool_id_set,
+        filament_id,
+        filament_id_set,
         reset,
     ):
         filament_info = dict(mms_slot.meta.filament_info or {})
@@ -1856,10 +1861,17 @@ class MMS:
                 if mms_slot.meta.spool_id is not None:
                     mms_slot.set_spool_id(None)
                     updated = True
-            else:
-                if mms_slot.meta.spool_id != spool_id:
-                    mms_slot.set_spool_id(spool_id)
-                    updated = True
+            if mms_slot.meta.spool_id != spool_id:
+                mms_slot.meta.spool_id = spool_id
+                updated = True
+
+        if filament_id_set:
+            if filament_info.get("filament_id") != filament_id:
+                if filament_id is None:
+                    filament_info.pop("filament_id", None)
+                else:
+                    filament_info["filament_id"] = filament_id
+                updated = True
 
         if updated:
             mms_slot.set_filament_info(filament_info)
@@ -1899,6 +1911,7 @@ class MMS:
         bed_temp_raw = gcmd.get("BED_TEMP", default=None)
         nozzle_temp_raw = gcmd.get("NOZZLE_TEMP", default=None)
         spool_id_raw = gcmd.get_int("SPOOLID", default=gcmd.get_int("SPOOL_ID", default=None))
+        filament_id_raw = gcmd.get("FILAMENT_ID", default=gcmd.get("FILAMENTID", default=None))
 
         vendor_set = vendor_raw is not None
         name_set = name_raw is not None
@@ -1907,6 +1920,7 @@ class MMS:
         bed_temp_set = bed_temp_raw is not None
         nozzle_temp_set = nozzle_temp_raw is not None
         spool_id_set = spool_id_raw is not None
+        filament_id_set = filament_id_raw is not None
 
         vendor = self._normalize_slot_map_value(vendor_raw)
         name = self._normalize_slot_map_value(name_raw)
@@ -1917,6 +1931,7 @@ class MMS:
         bed_temp = self._normalize_slot_map_number(bed_temp_raw, "BED_TEMP")
         nozzle_temp = self._normalize_slot_map_number(
             nozzle_temp_raw, "NOZZLE_TEMP")
+        filament_id = self._normalize_slot_map_value(filament_id_raw)
 
         if bed_temp == "__invalid__" or nozzle_temp == "__invalid__":
             return
@@ -1942,6 +1957,7 @@ class MMS:
                 bed_temp_set,
                 nozzle_temp_set,
                 spool_id_set,
+                filament_id_set,
                 reset,
             ]
         )

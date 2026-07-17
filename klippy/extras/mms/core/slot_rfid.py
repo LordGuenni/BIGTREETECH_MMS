@@ -478,16 +478,35 @@ class SlotRFID:
                         self._apply_tag_data()
                     else:
                         self.log_info(f"slot[{self.slot_num}] Decoding Failed / Blank TAG Detected")
+                        self._fallback_to_spoolman_rfid()
                 
                 else:
                     self.log_warning(f"slot[{self.slot_num}] Unknown tag data format: {data[:100]}...")
+                    self._fallback_to_spoolman_rfid()
 
             except Exception as e:
                 self.log_error(f"slot[{self.slot_num}] RFID processing error: {e}")
+                self._fallback_to_spoolman_rfid()
 
         elif time.time()-self.read_begin_at > self.read_duration:
             self.rfid_read_end()
             self.log_info(f"slot[{self.slot_num}] RFID read timeout")
+
+    def _fallback_to_spoolman_rfid(self):
+        uid = self.get_tag_uid() or (self.mms_rfid.rfid_manager.get_uid() if self.mms_rfid else None)
+        if uid:
+            if isinstance(uid, list):
+                uid_str = ' '.join(hex(i).upper()[2:].zfill(2) for i in uid)
+            else:
+                uid_str = str(uid)
+                
+            try:
+                from ..adapters.printer import printer_adapter
+                webhooks = printer_adapter.get_obj("webhooks")
+                self.log_info(f"slot[{self.slot_num}] Requesting Moonraker to lookup Spoolman by RFID: {uid_str}")
+                webhooks.call_remote_method("spoolman_lookup_spool_by_rfid", gate=self.slot_num, uid=uid_str, sync=True)
+            except Exception as e:
+                self.log_warning(f"slot[{self.slot_num}] Failed to request Spoolman RFID lookup: {e}")
 
     def _try_openprinttag_read(self):
         try:
