@@ -59,6 +59,19 @@ Please refor to [mms_config](./docs/en/mms_config.md) for details.
 ### ChangeLog
 Please refor to [mms_changelog](./docs/en/mms_changelog.md) for details.
 
+### Moonraker Update Manager
+To keep BIGTREETECH_MMS up to date directly from your Mainsail/Fluidd web interface, add the following block to your `moonraker.conf`:
+
+```ini
+[update_manager bigtreetech_mms]
+type: git_repo
+path: ~/BIGTREETECH_MMS
+origin: https://github.com/bigtreetech/BIGTREETECH_MMS.git
+managed_services: klipper moonraker
+primary_branch: main
+install_script: update.sh
+```
+
 ### 🐇 Acknowledgements
 The script implementation referenced the logic and some source code from the excellent project [Happy-Hare](https://github.com/moggieuk/Happy-Hare) and [AFC](https://github.com/ArmoredTurtle/AFC-Klipper-Add-On).
 

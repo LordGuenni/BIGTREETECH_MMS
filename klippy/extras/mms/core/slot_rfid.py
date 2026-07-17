@@ -516,7 +516,7 @@ class SlotRFID:
                 from ..adapters.printer import printer_adapter
                 webhooks = printer_adapter.get_obj("webhooks")
                 self.log_info(f"slot[{self.slot_num}] Triggering Moonraker Spoolman process for RFID: {uid_str}")
-                webhooks.call_remote_method("spoolman_process_rfid", gate=self.slot_num, uid=uid_str, decoded_spool_id=decoded_spool_id, sync=False)
+                webhooks.call_remote_method("spoolman_process_rfid", gate=self.slot_num, uid=uid_str, decoded_spool_id=decoded_spool_id, sync=True)
             except Exception as e:
                 self.log_warning(f"slot[{self.slot_num}] Failed to trigger Spoolman RFID process: {e}")
 
