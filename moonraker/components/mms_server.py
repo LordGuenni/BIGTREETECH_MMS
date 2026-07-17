@@ -168,7 +168,8 @@ class MmsServer:
             if self._mms_backend_enabled():
                 error_flag = "ERROR=1" if error else ""
                 msg = msg.replace("\n", "\\n") # Get through klipper filtering
-                await self.klippy_apis.run_gcode(f"MMS_LOG MSG='{msg}' {error_flag}")
+                msg = msg.replace('"', "'") # Prevent breaking double quotes
+                await self.klippy_apis.run_gcode(f'MMS_LOG MSG="{msg}" {error_flag}')
             else:
                 for msg in msg.split("\n"):
                     await self.klippy_apis.run_gcode(f"M118 {msg}")
@@ -289,7 +290,7 @@ class MmsServer:
             errors = ""
             assignments = {}
             sids_to_fix = []
-            reponse = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/spool')
+            reponse = await self.http_client.get(url=f'{self.spoolman.spoolman_url}/v1/spool?limit=10000')
             for spool_info in reponse.json():
                 spool_id = spool_info['id']
                 
@@ -616,13 +617,13 @@ class MmsServer:
         # Add lowercase versions to be completely bulletproof
         formats_to_try.extend([f.lower() for f in formats_to_try])
 
-        url = f'{self.spoolman.spoolman_url}/v1/spool' # Fetch all spools, can't filter by custom field
+        url = f'{self.spoolman.spoolman_url}/v1/spool?limit=10000' # Fetch all spools
         try:
             response = await self.http_client.get(url=url)
             spools = response.json()
             if spools and isinstance(spools, list):
                 for spool in spools:
-                    spool_rfid = str(spool.get('extra', {}).get('rfid_tag', '')).strip()
+                    spool_rfid = str(spool.get('extra', {}).get('rfid_tag', '')).strip(' \t\n\r"')
                     if not spool_rfid:
                         continue
                         
@@ -634,7 +635,7 @@ class MmsServer:
                                 await self._log_n_send(f'Found spool {spool_id} matching RFID UID "{fmt}", assigning to gate {gate}', silent=silent)
                                 return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
         except Exception as e:
-            pass
+            await self._log_n_send(f"Error checking Spoolman UIDs: {e}", error=True, silent=silent)
 
         # 2. Try Decoded Spool ID Match
         if decoded_spool_id:
