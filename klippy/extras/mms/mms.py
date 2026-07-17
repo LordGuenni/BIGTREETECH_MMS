@@ -5,6 +5,9 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import json
+import os
+import ast
+import configparser
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -108,6 +111,15 @@ class MMS:
 
         # Spoolman Support
         self.spoolman_support = self.p_mms_config.spoolman_support.lower()
+
+        printer = config.get_printer()
+        start_args = printer.get_start_args()
+        config_file = start_args.get('config_file', "")
+        vars_file = config.get('vars_file', 'mms_vars.cfg')
+        if config_file:
+            self.mms_vars_file = os.path.join(os.path.dirname(config_file), vars_file)
+        else:
+            self.mms_vars_file = None
 
         # Init components
         self._initialize()
@@ -238,6 +250,80 @@ class MMS:
             mms_slot = self.get_mms_slot(slot_num)
             mms_slot.set_mms_drive(mms_drive)
 
+    def _save_mms_vars(self):
+        if not self.mms_vars_file:
+            return
+        try:
+            config = configparser.ConfigParser()
+            config.optionxform = str
+            config['Variables'] = {}
+            for slot in self.mms_slots:
+                info = slot.get_filament_info()
+                prefix = f"mms_slot_{slot.get_num()}_"
+                for k, v in info.items():
+                    if v is not None and v != "":
+                        config['Variables'][prefix + k] = repr(v)
+                
+                # Save calibration lengths
+                for (pin_type, forward), d_dist in slot.meta.deliver_vector.items():
+                    if d_dist and d_dist.deliver_distance:
+                        f_str = "forward" if forward else "backward"
+                        key = f"{prefix}calib_{pin_type.value}_{f_str}"
+                        config['Variables'][key] = repr(d_dist.deliver_distance)
+
+            with open(self.mms_vars_file, 'w') as f:
+                config.write(f)
+        except Exception as e:
+            self.log_info_s(f"Failed to save MMS vars: {e}")
+
+    def _load_mms_vars(self):
+        if not self.mms_vars_file or not os.path.exists(self.mms_vars_file):
+            return
+        try:
+            config = configparser.ConfigParser()
+            config.optionxform = str
+            config.read(self.mms_vars_file)
+            if 'Variables' not in config:
+                return
+            variables = config['Variables']
+            
+            for slot in self.mms_slots:
+                prefix = f"mms_slot_{slot.get_num()}_"
+                updates = {}
+                for key, value in variables.items():
+                    if not key.startswith(prefix):
+                        continue
+                    suffix = key[len(prefix):]
+                    try:
+                        val = ast.literal_eval(value)
+                    except Exception:
+                        continue
+                    
+                    if suffix.startswith("calib_"):
+                        # parse calib_<pin_type>_<direction>
+                        calib_parts = suffix[len("calib_"):].rsplit("_", 1)
+                        if len(calib_parts) == 2:
+                            pin_type_str, dir_str = calib_parts
+                            forward = (dir_str == "forward")
+                            # Convert string back to PinType enum manually or just leave it for set_deliver_distance?
+                            # Klipper MMS slot.meta.set_deliver_distance expects PinType enum.
+                            from .core.slot_pin import PinType
+                            try:
+                                pin_type = PinType(pin_type_str)
+                                slot.meta.set_deliver_distance(pin_type, forward, val)
+                            except ValueError:
+                                pass
+                    else:
+                        if suffix in ['vendor', 'name', 'material', 'color', 'bed_temp', 'nozzle_temp', 'spool_id', 'filament_id']:
+                            updates[suffix] = val
+
+                if updates:
+                    current_info = slot.get_filament_info()
+                    current_info.update(updates)
+                    slot.set_filament_info(current_info)
+        except Exception as e:
+            self.log_info_s(f"Failed to load MMS vars: {e}")
+
     # -- Register handlers --
     def _register_event(self):
         printer_adapter.register_klippy_connect(
@@ -273,10 +359,10 @@ class MMS:
         # Try to sync data
         try:
             if self._is_connected:
-                # Step 1: Basic lane data pull (Restore state from Moonraker DB)
+                # Step 1: Basic lane data pull (Restore state from local file)
                 if self._sync_retry_count == 1:
-                    webhooks = printer_adapter.get_obj("webhooks")
-                    webhooks.call_remote_method("moonraker_pull_lane_data")
+                    self._load_mms_vars()
+                    self.notify_lane_data_changed()
                     return eventtime + 2.0 # Wait for commands to be processed
 
                 # Step 2: Spoolman specific sync
@@ -1612,6 +1698,12 @@ class MMS:
         for mms_slot in sorted(self.mms_slots, key=lambda s: s.get_num()):
             vendor, name, material, color = self._get_slot_map_fields(mms_slot)
             filament_info = mms_slot.meta.filament_info or {}
+            
+            bed_temp = filament_info.get("bed_temperature")
+            nozzle_temp = filament_info.get("nozzle_temp")
+            filament_id = filament_info.get("filament_id") if filament_info else None
+            spool_id = mms_slot.meta.spool_id
+
             line = (
                 f"Slot {mms_slot.get_num()}: "
                 f"material={fmt(material)} "
@@ -1620,17 +1712,20 @@ class MMS:
                 f"vendor={fmt(vendor)}"
             )
             if detail:
-                bed_temp = filament_info.get("bed_temperature")
-                nozzle_temp = filament_info.get("nozzle_temp")
-                filament_id = (
-                    filament_info.get("filament_id") if filament_info else None
-                )
                 line += (
-                    f" spool_id={fmt(mms_slot.meta.spool_id)}"
+                    f" spool_id={fmt(spool_id)}"
                     f" filament_id={fmt(filament_id)}"
                     f" bed_temp={fmt(bed_temp)}"
                     f" nozzle_temp={fmt(nozzle_temp)}"
                 )
+            else:
+                if spool_id is not None and spool_id != "":
+                    line += f" spool_id={spool_id}"
+                if bed_temp is not None and bed_temp != "":
+                    line += f" bed_temp={bed_temp}"
+                if nozzle_temp is not None and nozzle_temp != "":
+                    line += f" nozzle_temp={nozzle_temp}"
+                    
             lines.append(line)
         return "\n".join(lines)
 
@@ -1887,6 +1982,7 @@ class MMS:
                 updated_slots.append(gate_num)
 
         if updated_slots and not sync:
+            self._save_mms_vars()
             self.notify_lane_data_changed(updated_slots)
 
         if not quiet:

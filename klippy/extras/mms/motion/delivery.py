@@ -1632,6 +1632,7 @@ class MMSDelivery:
 
                     # Finally write to file
                     mms_slot.meta.write_file()
+                    self.mms._save_mms_vars()
 
             except DeliveryReadyError:
                 # Keep on next SLOT
