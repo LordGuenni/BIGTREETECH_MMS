@@ -1999,6 +1999,8 @@ class MMS:
                 nozzle_temp_set,
                 spool_id_raw,
                 spool_id_set,
+                filament_id_raw,
+                filament_id_set,
                 reset,
             )
             if updated:
