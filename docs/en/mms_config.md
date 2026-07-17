@@ -73,6 +73,7 @@ When loading filament from `Inlet to Gate`, if the feed distance exceeds the max
  
 * 5: Filament Runout Detection - Continuously monitors the Inlet sensor and immediately pauses printing when the active slot runs out of filament.
 * 6: Automatic Filament Substitution - When filament runs out during printing, the system automatically switches to the slot defined by `endless_with_slot` in `mms-slot.cfg` (**Note:** Requires `filament_detection_enable`to be enabled).
+* 7: State Persistence (`persistence_enable`) - By default, MMS state (like current filament loaded, slot data, gate statuses) is saved automatically to `mms_vars.cfg` inside the `mms` configuration folder. This ensures the printer remembers what spool is loaded even after a reboot.
 
 #### MMS Logger Configuration
 
