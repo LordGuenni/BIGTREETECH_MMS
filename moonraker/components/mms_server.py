@@ -73,7 +73,7 @@ class MmsServer:
             self.server.register_remote_method("spoolman_get_spool_info", self.display_spool_info)
             self.server.register_remote_method("spoolman_display_spool_location", self.display_spool_location)
             self.server.register_remote_method("spoolman_write_to_rfid", self.write_to_rfid)
-            self.server.register_remote_method("spoolman_lookup_spool_by_rfid", self.lookup_spool_by_rfid)
+            self.server.register_remote_method("spoolman_process_rfid", self.process_rfid)
 
         # Moonraker lane data push for slicer integration
         self.server.register_remote_method("moonraker_push_lane_data", self.push_lane_data)
@@ -596,23 +596,50 @@ class MmsServer:
                 return await self._send_gate_map_update(gate_ids, replace=True, silent=silent)
             return True
 
-    async def lookup_spool_by_rfid(self, gate=None, uid=None, sync=False, silent=False) -> bool:
-        if not await self._check_init_spoolman(): return False
+    async def process_rfid(self, gate=None, uid=None, decoded_spool_id=None, sync=False, silent=False) -> bool:
+        if not await self._check_init_spoolman():
+            return False
+            
         if gate is None or not uid:
             return False
 
-        url = f'{self.spoolman.spoolman_url}/v1/spool?extra_rfid_tag={uid}'
-        try:
-            response = await self.http_client.get(url=url)
-            spools = response.json()
-            if spools and isinstance(spools, list) and len(spools) > 0:
-                spool_id = spools[0].get('id')
-                if spool_id:
-                    logging.info(f"Found spool {spool_id} matching RFID {uid}, assigning to gate {gate}")
-                    return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
-        except Exception as e:
-            logging.info(f"Failed to lookup spool by RFID from spoolman: {e}")
-        
+        # 1. Try UID Match FIRST (Test multiple common formats)
+        import re
+        import urllib.parse
+        raw_uid = re.sub(r'[^a-fA-F0-9]', '', uid).upper()
+        formats_to_try = [
+            ' '.join(raw_uid[i:i+2] for i in range(0, len(raw_uid), 2)), # 04 AA BB CC DD
+            raw_uid, # 04AABBCCDD
+            ':'.join(raw_uid[i:i+2] for i in range(0, len(raw_uid), 2)), # 04:AA:BB:CC:DD
+            '-'.join(raw_uid[i:i+2] for i in range(0, len(raw_uid), 2)), # 04-AA-BB-CC-DD
+        ]
+        # Add lowercase versions to be completely bulletproof
+        formats_to_try.extend([f.lower() for f in formats_to_try])
+
+        for fmt in formats_to_try:
+            encoded_fmt = urllib.parse.quote(fmt)
+            url = f'{self.spoolman.spoolman_url}/v1/spool?extra_rfid_tag={encoded_fmt}'
+            try:
+                response = await self.http_client.get(url=url)
+                spools = response.json()
+                if spools and isinstance(spools, list) and len(spools) > 0:
+                    spool_id = spools[0].get('id')
+                    if spool_id:
+                        logging.info(f"Found spool {spool_id} matching RFID UID '{fmt}', assigning to gate {gate}")
+                        return await self.set_spool_gate(spool_id=spool_id, gate=gate, sync=sync, silent=silent)
+            except Exception as e:
+                pass
+
+        # 2. Try Decoded Spool ID Match
+        if decoded_spool_id:
+            try:
+                logging.info(f"UID match failed, but found decoded Spool ID {decoded_spool_id}, assigning to gate {gate}")
+                return await self.set_spool_gate(spool_id=decoded_spool_id, gate=gate, sync=sync, silent=silent)
+            except Exception as e:
+                logging.info(f"Failed to assign decoded spool ID: {e}")
+
+        # 3. Neither matched
+        logging.info(f"Could not match UID {uid} or decoded Spool ID {decoded_spool_id} in Spoolman.")
         return False
 
     async def unset_spool_gate(self, spool_id=None, gate=None, sync=False, silent=False) -> bool:

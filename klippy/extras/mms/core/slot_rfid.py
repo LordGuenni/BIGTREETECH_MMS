@@ -312,7 +312,7 @@ class SlotRFID:
         self.log_info_s(f"slot[{self.slot_num}] RFID detect end")
 
     def _handle_detected(self, data):
-        if data:
+        if data and self._is_detecting:
             self.rfid_detect_end()
             # Format UID as Hex for better readability
             if isinstance(data, (list, bytes, bytearray)):
@@ -378,8 +378,11 @@ class SlotRFID:
         if data:
             self.detect_only_end()
             self.tag_uid = data
-            self.log_info(
-                f"slot[{self.slot_num}] RFID only detect data: {data}")
+            if isinstance(data, (list, bytes, bytearray)):
+                uid_hex = " ".join([f"{b:02X}" for c in [data] for b in c])
+            else:
+                uid_hex = str(data)
+            self.log_info(f"slot[{self.slot_num}] RFID detected UID: {uid_hex}")
             
             try:
                 mms_delivery = printer_adapter.get_mms_delivery()
@@ -443,6 +446,14 @@ class SlotRFID:
     def _handle_read(self, data):
         if data:
             self.rfid_read_end()
+            decoded_spool_id = None
+            
+            # Grab and print the UID immediately
+            uid = self.get_tag_uid() or (self.mms_rfid.rfid_manager.get_uid() if self.mms_rfid else None)
+            if uid:
+                uid_str = ' '.join(hex(i).upper()[2:].zfill(2) for i in uid) if isinstance(uid, list) else str(uid)
+                self.log_info(f"slot[{self.slot_num}] RFID read UID: {uid_str}")
+            
             try:
                 tag_dict = json.loads(data)
                 # 1. Standard BTT Tag (JSON contains filament details directly)
@@ -474,25 +485,26 @@ class SlotRFID:
                             "spool_id": parsed_info.get("spoolman_id")
                         }
                         
+                        decoded_spool_id = self.tag_data.get("spool_id")
                         self.tag_color = self.tag_data["color_code"]
                         self._apply_tag_data()
                     else:
                         self.log_info(f"slot[{self.slot_num}] Decoding Failed / Blank TAG Detected")
-                        self._fallback_to_spoolman_rfid()
                 
                 else:
                     self.log_warning(f"slot[{self.slot_num}] Unknown tag data format: {data[:100]}...")
-                    self._fallback_to_spoolman_rfid()
 
             except Exception as e:
                 self.log_error(f"slot[{self.slot_num}] RFID processing error: {e}")
-                self._fallback_to_spoolman_rfid()
+                
+            # Now trigger Moonraker to process the tag (UID matching and Spoolman logic)
+            self._process_rfid_in_moonraker(decoded_spool_id)
 
         elif time.time()-self.read_begin_at > self.read_duration:
             self.rfid_read_end()
             self.log_info(f"slot[{self.slot_num}] RFID read timeout")
 
-    def _fallback_to_spoolman_rfid(self):
+    def _process_rfid_in_moonraker(self, decoded_spool_id):
         uid = self.get_tag_uid() or (self.mms_rfid.rfid_manager.get_uid() if self.mms_rfid else None)
         if uid:
             if isinstance(uid, list):
@@ -503,10 +515,10 @@ class SlotRFID:
             try:
                 from ..adapters.printer import printer_adapter
                 webhooks = printer_adapter.get_obj("webhooks")
-                self.log_info(f"slot[{self.slot_num}] Requesting Moonraker to lookup Spoolman by RFID: {uid_str}")
-                webhooks.call_remote_method("spoolman_lookup_spool_by_rfid", gate=self.slot_num, uid=uid_str, sync=True)
+                self.log_info(f"slot[{self.slot_num}] Triggering Moonraker Spoolman process for RFID: {uid_str}")
+                webhooks.call_remote_method("spoolman_process_rfid", gate=self.slot_num, uid=uid_str, decoded_spool_id=decoded_spool_id, sync=False)
             except Exception as e:
-                self.log_warning(f"slot[{self.slot_num}] Failed to request Spoolman RFID lookup: {e}")
+                self.log_warning(f"slot[{self.slot_num}] Failed to trigger Spoolman RFID process: {e}")
 
     def _try_openprinttag_read(self):
         try:
