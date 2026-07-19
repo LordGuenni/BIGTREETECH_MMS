@@ -474,7 +474,9 @@ class MMSEject:
                     msg, self.mms.get_mms_slot(eject_slots[0]))
 
             # Heat extruder
+            self.mms.progress["heat"] = 50
             extruder_adapter.heat_to_min_temp()
+            self.mms.progress["heat"] = 100
 
             self.log_info_s(f"slots:{eject_slots} would be ejected")
 
@@ -487,14 +489,17 @@ class MMSEject:
                 )
 
             if self.mms_cut.is_enabled():
+                self.mms.progress["cut"] = 50
                 # Park to cutter init point
                 self.mms_cut.cut_init()
                 # Do Cut
                 if not self.mms_cut.mms_cut():
+                    self.mms.progress["cut"] = 100
                     raise EjectFailedError(
                         f"slot[{eject_slots[0]}] eject cut failed",
                         self.mms.get_mms_slot(eject_slots[0])
                     )
+                self.mms.progress["cut"] = 100
 
             if self.mms_purge.is_enabled():
                 # Park to tray point
@@ -528,7 +533,9 @@ class MMSEject:
                     raise EjectFailedError(msg, mms_slot)
 
                 # Unload
+                self.mms.progress["feed"] = 50
                 success = self.mms_delivery.mms_unload(slot_num)
+                self.mms.progress["feed"] = 100
 
             if success:
                 msg = "mms eject finish"
@@ -562,10 +569,16 @@ class MMSEject:
         except EjectFailedError as e:
             self.log_warning(e)
             gcode_adapter.respond_error("mms eject failed")
+            self.mms.progress["heat"] = 100
+            self.mms.progress["cut"] = 100
+            self.mms.progress["feed"] = 100
             return False
         except Exception as e:
             self.log_error(f"mms eject error: {e}")
             gcode_adapter.respond_error("mms eject failed")
+            self.mms.progress["heat"] = 100
+            self.mms.progress["cut"] = 100
+            self.mms.progress["feed"] = 100
             return False
 
     def mms_eject_unselect(self):

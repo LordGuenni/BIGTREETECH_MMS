@@ -76,6 +76,7 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
 
     is_extended: bool = False
     extend_num: Optional[int] = field(default=None)
+    action_timestamp: float = 0.0
 
     # key:(
     #     destination -> pin_type:str,
@@ -103,6 +104,7 @@ class SlotMeta(SlotPinMeta, SlotFilamentMeta):
 
                 "is_extended" : self.is_extended,
                 "extend_num" : self.extend_num,
+                "action_timestamp" : self.action_timestamp,
 
                 "filament_color" : self.filament_color,
                 "filament_material" : self.filament_material,

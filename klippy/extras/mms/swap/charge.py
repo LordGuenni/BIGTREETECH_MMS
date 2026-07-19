@@ -525,10 +525,12 @@ class MMSCharge:
                     skip_slot=slot_num)
 
                 # Load wanted slot
+                self.mms.progress["feed"] = 50
                 if mms_slot.entry_is_set():
                     self.mms_delivery.load_to_entry(slot_num)
                 else:
                     self.mms_delivery.load_to_outlet(slot_num)
+                self.mms.progress["feed"] = 100
 
                 # Sprint slowly
                 self.mms_delivery.mms_drive_sprint(
@@ -552,11 +554,13 @@ class MMSCharge:
         except ChargeFailedError as e:
             self.log_warning(e)
             gcode_adapter.respond_error("mms charge failed")
+            self.mms.progress["feed"] = 100
             return False
         except Exception as e:
             # May receive DeliveryFailedError/DeliveryTerminateSignal
             self.log_error(f"slot[{slot_num}] mms charge error: {e}")
             gcode_adapter.respond_error("mms charge failed")
+            self.mms.progress["feed"] = 100
             return False
 
     # def _charged_confirm(self, slot_num):

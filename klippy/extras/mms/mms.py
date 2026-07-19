@@ -109,6 +109,8 @@ class MMS:
         self.mms_selectors = []
         self.mms_drives = []
 
+        self.progress = {"heat": 100, "cut": 100, "feed": 100, "purge": 100}
+
         # Spoolman Support
         self.spoolman_support = self.p_mms_config.spoolman_support.lower()
 
@@ -502,6 +504,9 @@ class MMS:
             # MMS Dryer
             ("MMS_DRYER_START", self.cmd_MMS_DRYER_START),
             ("MMS_DRYER_STOP", self.cmd_MMS_DRYER_STOP),
+
+            # Progress Tracking
+            ("MMS_SET_PROGRESS", self.cmd_MMS_SET_PROGRESS),
 
             # Alias
             (
@@ -1050,6 +1055,7 @@ class MMS:
                 extend.get_num() : extend.report()
                 for extend in self.mms_extends
             },
+            "progress" : self.progress.copy(),
             "loading_slots" : self.get_loading_slots(),
             "dryer": self.mms_dryer.report(),
         } if self._is_connected else {}
@@ -2082,6 +2088,21 @@ class MMS:
             mms_slot.truncate_deliver_distance()
             self.log_info(
                 f"slot[{slot_num}] deliver distance in meta is truncated")
+
+    def cmd_MMS_SET_PROGRESS(self, gcmd):
+        """
+        Usage:
+            MMS_SET_PROGRESS [HEAT=<value>] [CUT=<value>] [FEED=<value>] [PURGE=<value>]
+        """
+        heat = gcmd.get_int("HEAT", self.progress["heat"], minval=0, maxval=100)
+        cut = gcmd.get_int("CUT", self.progress["cut"], minval=0, maxval=100)
+        feed = gcmd.get_int("FEED", self.progress["feed"], minval=0, maxval=100)
+        purge = gcmd.get_int("PURGE", self.progress["purge"], minval=0, maxval=100)
+
+        self.progress["heat"] = heat
+        self.progress["cut"] = cut
+        self.progress["feed"] = feed
+        self.progress["purge"] = purge
 
     def cmd_MMS_TEST(self, gcmd):
         return

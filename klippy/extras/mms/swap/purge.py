@@ -553,6 +553,7 @@ class MMSPurge:
         self.log_info_s(f"{log_prefix} begin")
 
         with self._purge_is_running():
+            self.mms.progress["purge"] = 50
             try:
                 if self.is_enabled():
                     self._standard_purge(slot_num)
@@ -567,12 +568,15 @@ class MMSPurge:
 
             except PurgeFailedError as e:
                 self.log_warning(f"{log_prefix} failed: {e}")
+                self.mms.progress["purge"] = 100
                 return False
             except Exception as e:
                 self.log_error(f"{log_prefix} error: {e}")
+                self.mms.progress["purge"] = 100
                 return False
 
         self.log_info_s(f"{log_prefix} finish")
+        self.mms.progress["purge"] = 100
         self._exec_custom_macro(self.custom_after, "after")
         return True
 
@@ -591,6 +595,7 @@ class MMSPurge:
                 mms_slot = self.mms.get_mms_slot(slot_num)
                 mms_drive = mms_slot.get_mms_drive()
 
+                self.mms.progress["purge"] = 50
                 # Make sure mms_buffer is idle
                 self._pause_mms_buffer(slot_num)
 
@@ -659,15 +664,18 @@ class MMSPurge:
             self.log_info_s(msg)
 
             self._exec_custom_macro(self.custom_after, "after")
+            self.mms.progress["purge"] = 100
             return True
 
         except PurgeFailedError as e:
             self.log_warning(f"{log_prefix} failed: {e}")
             gcode_adapter.respond_error("mms purge failed")
+            self.mms.progress["purge"] = 100
             return False
         except Exception as e:
             self.log_error(f"{log_prefix} error: {e}")
             gcode_adapter.respond_error("mms purge failed")
+            self.mms.progress["purge"] = 100
             return False
 
     def mms_purge_lazy(self):

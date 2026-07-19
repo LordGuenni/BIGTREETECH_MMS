@@ -6,7 +6,7 @@
 
 | Command | Arguments (Defaults) | Description |
 |---|---|---|
-| `MMS_CHARGE` | `SLOT` (int, required) | Load filament into the heated extruder gears and sync (ready to print). |
+| `MMS_CHARGE` | `SLOT` (int, required) | Load filament into the heated extruder gears (temporarily syncs to assist loading). |
 | `MMS_CAREFUL_CHARGE` | `SLOT` (int, required) | Carefully engage filament into the extruder gears. |
 | `MMS_EJECT` | None | Extract filament from heated extruder gears and retract it back to the MMS. |
 | `MMS_EJECT_UNSELECT` | None | Eject filament and unselect the slot. |

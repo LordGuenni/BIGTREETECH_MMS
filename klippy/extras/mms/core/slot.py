@@ -35,6 +35,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -420,6 +421,7 @@ class MMSSlot:
     def complete_selector_moving(self):
         if self.mms_selector and self.mms_selector.is_running():
             self.mms_selector.complete_manual_home()
+        self.meta.action_timestamp = time.time()
 
     def complete_drive_moving(self):
         if self.mms_drive and self.mms_drive.is_running():
