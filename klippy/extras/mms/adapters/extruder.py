@@ -60,8 +60,11 @@ class ExtruderAdapter(BaseAdapter):
     def set_temperature(self, temp, wait=True):
         toolhead_adapter.set_extruder_temperature(temp, wait)
 
-    def heat_to_min_temp(self):
+    def heat_to_min_temp(self, target_temp=None):
         min_temp = self.get_min_temp()
+        if target_temp and target_temp > min_temp:
+            min_temp = target_temp
+
         if self.get_current_temp() < min_temp:
             msg = (
                 f"extruder[{self.get_extruder_name()}] wait until "

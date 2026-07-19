@@ -474,8 +474,20 @@ class MMSEject:
                     msg, self.mms.get_mms_slot(eject_slots[0]))
 
             # Heat extruder
+            mms_slot = self.mms.get_mms_slot(eject_slots[0])
+            filament_info = mms_slot.meta.filament_info or {}
+            target_temp = (
+                filament_info.get("nozzle_temp")
+                or filament_info.get("printing_temperature_min")
+                or filament_info.get("printing_temperature_max")
+            )
+            try:
+                target_temp = float(target_temp) if target_temp is not None else None
+            except ValueError:
+                target_temp = None
+
             self.mms.progress["heat"] = 50
-            extruder_adapter.heat_to_min_temp()
+            extruder_adapter.heat_to_min_temp(target_temp)
             self.mms.progress["heat"] = 100
 
             self.log_info_s(f"slots:{eject_slots} would be ejected")
